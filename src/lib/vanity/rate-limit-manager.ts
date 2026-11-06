@@ -179,7 +179,7 @@ export function noteResponse(d: RateLimitDiag, r: CheckResult, now = Date.now())
 export function noteLimit(
   d: RateLimitDiag,
   r: CheckResult,
-  reaction: { inline: boolean; appUntil: number; origin?: LimitOrigin },
+  reaction: { inline: boolean; appUntil: number; origin?: LimitOrigin | undefined },
   now = Date.now(),
 ): RateLimitDiag {
   const retry = r.discordQueried === true ? finiteWait(r.retryAfterSeconds) : null;
