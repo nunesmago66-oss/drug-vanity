@@ -9,6 +9,7 @@ import {
   REQUEST_TIMEOUT_MS,
   isValidCode,
   normalizeCode,
+  parseRetryAfter,
   type CheckResult,
   type RequestTrace,
 } from "./check-rules";
@@ -88,7 +89,53 @@ export async function checkInviteViaBackend(
     /* handled below */
   }
   const r = body as Partial<CheckResult> | null;
-  if (!res.ok || !r || typeof r !== "object" || r.code !== code) {
+  const validReply = res.ok && !!r && typeof r === "object" && r.code === code;
+  if (!validReply && (res.status === 429 || res.status === 503)) {
+    // The hosting in front of the site's server limited THIS page (Discord was
+    // not asked). Treated as a rate limit so the queue stops and honours the
+    // host's Retry-After instead of retrying it as an ordinary failure.
+    const wait = parseRetryAfter(res.headers.get("retry-after"));
+    console.warn(`[discord-check ${id}] hosting answered HTTP ${res.status} (Discord not queried)`);
+    return {
+      code,
+      status: "inconclusive",
+      httpStatus: 429,
+      retryAfterSeconds: wait,
+      blockedForSeconds: wait,
+      reason: `A hospedagem do site limitou as consultas deste navegador (HTTP ${res.status} antes de chegar ao servidor do site). O Discord não foi consultado.${wait != null ? ` Aguarde ${wait}s.` : ""}`,
+      checkedAt: new Date().toISOString(),
+      discordQueried: false,
+      errorKind: "app_block",
+      availability: "UNKNOWN",
+      limitHeaders: {
+        status: res.status,
+        contentType: res.headers.get("content-type")?.slice(0, 80) ?? null,
+        retryAfter: res.headers.get("retry-after")?.slice(0, 40) ?? null,
+        bodyRetryAfter: null,
+        bodyGlobal: null,
+        scope: null,
+        global: null,
+        bucket: null,
+        server: res.headers.get("server")?.slice(0, 40) ?? null,
+        cfRay: res.headers.get("cf-ray")?.slice(0, 60) ?? null,
+        cfMitigated: res.headers.get("cf-mitigated")?.slice(0, 40) ?? null,
+        html: /text\/html/i.test(res.headers.get("content-type") ?? ""),
+        isolateSent1s: null,
+        isolateSent10s: null,
+      },
+      trace: {
+        id,
+        url,
+        at: new Date(started).toISOString(),
+        layer: "browser",
+        durationMs: Date.now() - started,
+        errorName: `HTTP ${res.status}`,
+        errorMessage: "hosting limit",
+        probe: null,
+      },
+    };
+  }
+  if (!validReply) {
     const msg =
       r && typeof (r as { error?: unknown }).error === "string"
         ? (r as { error: string }).error
