@@ -221,8 +221,8 @@ export function ResultsTab({
     <div className="space-y-4">
       <p className="text-sm" data-testid="results-summary">
         <strong className="font-mono">{all.length.toLocaleString("pt-BR")}</strong> códigos testados
-        · {counts.ACTIVE} ativas · {counts.NOT_IN_USE} não estão em uso ·{" "}
-        {counts.CONFIRMED_FREE} liberadas · {counts.UNKNOWN} indefinidas
+        · {counts.ACTIVE} ativas · {counts.NOT_IN_USE} não estão em uso · {counts.CONFIRMED_FREE}{" "}
+        liberadas · {counts.UNKNOWN} indefinidas
       </p>
 
       <section

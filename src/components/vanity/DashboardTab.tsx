@@ -149,15 +149,13 @@ export function DashboardTab({
       bar: "bg-primary",
       share: totals.verified ? 100 : 0,
     },
-    ...CATEGORY_ORDER.filter((a) => a !== "INVALID" || totals.categories.INVALID > 0).map(
-      (a) => ({
-        label: AVAILABILITY_PLURAL[a],
-        value: totals.categories[a],
-        hint: CATEGORY_HINT[a],
-        bar: CATEGORY_BAR[a],
-        share: totals.verified ? (totals.categories[a] / totals.verified) * 100 : 0,
-      }),
-    ),
+    ...CATEGORY_ORDER.filter((a) => a !== "INVALID" || totals.categories.INVALID > 0).map((a) => ({
+      label: AVAILABILITY_PLURAL[a],
+      value: totals.categories[a],
+      hint: CATEGORY_HINT[a],
+      bar: CATEGORY_BAR[a],
+      share: totals.verified ? (totals.categories[a] / totals.verified) * 100 : 0,
+    })),
   ];
 
   const checkCards = [
@@ -383,27 +381,27 @@ export function DashboardTab({
                 {history.slice(0, limit).map((entry) => {
                   const [code, s, http, ts, mode, rt] = entry;
                   return (
-                  <li
-                    key={`${code}-${ts}-${mode}`}
-                    className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2"
-                  >
-                    <span
-                      className="w-12 font-mono text-base font-semibold"
-                      title={inviteLabel(code)}
+                    <li
+                      key={`${code}-${ts}-${mode}`}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2"
                     >
-                      {code}
-                    </span>
-                    <StatusBadge status={STATUS[s]} className="text-[11px]" />
-                    <span className="text-[11px] font-medium">
-                      {AVAILABILITY_LABEL[historyAvailability(entry)]}
-                    </span>
-                    <span className="ml-auto text-right text-[11px] text-muted-foreground tabular-nums">
-                      {when(ts)}
-                      <br />
-                      {mode === "a" ? "Combinações" : "Significado"} · HTTP {http ?? "—"}
-                      {rt !== null ? ` · ${ms(rt)}` : ""}
-                    </span>
-                  </li>
+                      <span
+                        className="w-12 font-mono text-base font-semibold"
+                        title={inviteLabel(code)}
+                      >
+                        {code}
+                      </span>
+                      <StatusBadge status={STATUS[s]} className="text-[11px]" />
+                      <span className="text-[11px] font-medium">
+                        {AVAILABILITY_LABEL[historyAvailability(entry)]}
+                      </span>
+                      <span className="ml-auto text-right text-[11px] text-muted-foreground tabular-nums">
+                        {when(ts)}
+                        <br />
+                        {mode === "a" ? "Combinações" : "Significado"} · HTTP {http ?? "—"}
+                        {rt !== null ? ` · ${ms(rt)}` : ""}
+                      </span>
+                    </li>
                   );
                 })}
               </ul>

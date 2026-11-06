@@ -39,9 +39,9 @@ describe("Verified Availability via mocked Discord responses", () => {
     );
     expect(r.availability).toBe("EXPIRED");
   });
-  it("HTTP 404 / Unknown Invite → UNKNOWN, never CONFIRMED_FREE", async () => {
+  it("HTTP 404 / Unknown Invite → NOT_IN_USE, never CONFIRMED_FREE", async () => {
     const r = await check("abc", async () => json(404, { code: 10006, message: "Unknown Invite" }));
-    expect(r.availability).toBe("UNKNOWN");
+    expect(r.availability).toBe("NOT_IN_USE");
     expect(r.discordErrorCode).toBe(10006);
   });
   it("HTTP 400 → INVALID", async () => {
@@ -88,14 +88,14 @@ describe("Confirmation rules", () => {
       "CONFIRMED_FREE",
     );
     expect(classifyAvailability({ ...base, officialConfirmation: official("xyz") })).toBe(
-      "UNKNOWN",
+      "NOT_IN_USE",
     );
     expect(
       classifyAvailability({
         ...base,
         officialConfirmation: { ...official("abc"), source: "guess" } as never,
       }),
-    ).toBe("UNKNOWN");
+    ).toBe("NOT_IN_USE");
   });
   it("invalid code format → INVALID", () => {
     expect(classifyAvailability({ code: "-a", formatValid: false, httpStatus: null })).toBe(
@@ -130,10 +130,10 @@ describe("Confirmation rules", () => {
       reason: "",
       checkedAt: new Date().toISOString(),
     });
-    expect(r.availability).toBe("UNKNOWN");
+    expect(r.availability).toBe("NOT_IN_USE");
   });
-  it("exposes all seven states", () => {
-    expect(AVAILABILITY_STATES).toHaveLength(7);
+  it("exposes all eight states (seven categories plus INVALID)", () => {
+    expect(AVAILABILITY_STATES).toHaveLength(8);
   });
 });
 
@@ -150,7 +150,7 @@ describe("Persistence and resume", () => {
   });
   it("legacy results derive availability from HTTP status", () => {
     expect(availabilityOf(["e", 200, 1])).toBe("ACTIVE");
-    expect(availabilityOf(["n", 404, 1])).toBe("UNKNOWN");
+    expect(availabilityOf(["n", 404, 1])).toBe("NOT_IN_USE");
     expect(availabilityOf(["x", 429, 1, "d"])).toBe("UNKNOWN");
   });
   it("tampered CONFIRMED_FREE on a 429 or 200 is rejected on load", () => {
