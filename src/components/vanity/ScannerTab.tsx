@@ -68,6 +68,7 @@ import { emptyBackground, type BackgroundSnapshot } from "@/lib/vanity/backgroun
 import { EMPTY_STATS, STATS_KEY } from "@/lib/vanity/stats";
 import {
   describeDiag,
+  emptyDiag,
   getDiag,
   noteLimit,
   noteResponse,
@@ -143,8 +144,22 @@ export function ScannerTab({
   const [pace, setPace] = useState<PaceState>(initialPace);
   const [queueNote, setQueueNote] = useState<string | null>(null);
   const [inlineUntil, setInlineUntil] = useState(0);
-  const [diagLocal, setDiagLocal] = useState(getDiag);
-  useEffect(() => subscribeDiag(() => setDiagLocal(getDiag())), []);
+  // Read after hydration: browser storage and navigator.onLine do not exist on the server.
+  const [diagLocal, setDiagLocal] = useState(() => emptyDiag(0));
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    setDiagLocal(getDiag());
+    const net = () => setOnline(navigator.onLine);
+    net();
+    window.addEventListener("online", net);
+    window.addEventListener("offline", net);
+    const unsub = subscribeDiag(() => setDiagLocal(getDiag()));
+    return () => {
+      unsub();
+      window.removeEventListener("online", net);
+      window.removeEventListener("offline", net);
+    };
+  }, []);
   const [visible, setVisible] = useState(true);
   useEffect(() => {
     const on = () => setVisible(document.visibilityState === "visible");
@@ -673,7 +688,7 @@ export function ScannerTab({
     cooldownUntil,
     now,
     running,
-    online: typeof navigator === "undefined" ? true : navigator.onLine,
+    online,
     inlineUntil: localBackground ? (running ? cooldownUntil : 0) : inlineUntil,
   });
   const noLength = !meaningMode && config.source === "generated" && !config.len2 && !config.len3;
