@@ -42,7 +42,12 @@ export type LimitOrigin = RateLimitSource | "suspected_edge";
 export function inlineLimitWaitMs(
   r: Pick<
     CheckResult,
-    "httpStatus" | "discordQueried" | "limitLayer" | "limitGlobal" | "limitScope" | "retryAfterSeconds"
+    | "httpStatus"
+    | "discordQueried"
+    | "limitLayer"
+    | "limitGlobal"
+    | "limitScope"
+    | "retryAfterSeconds"
   >,
   inlineRetries: number,
 ): number | null {
@@ -236,17 +241,30 @@ export const ORIGIN_LABEL: Record<LimitOrigin, string> = {
 };
 
 const hhmmss = (ms: number) =>
-  new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  new Date(ms).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
 export function describeDiag(
   d: RateLimitDiag,
-  ctx: { cooldownUntil: number; now: number; running: boolean; online: boolean; inlineUntil?: number },
+  ctx: {
+    cooldownUntil: number;
+    now: number;
+    running: boolean;
+    online: boolean;
+    inlineUntil?: number;
+  },
 ): DiagView {
   const { now } = ctx;
   const l = d.lastLimit;
   const inlineWait = ctx.running && (ctx.inlineUntil ?? 0) > now;
   const cooling = ctx.cooldownUntil > now;
-  const remainingMs = Math.max(cooling ? ctx.cooldownUntil - now : 0, inlineWait ? (ctx.inlineUntil ?? 0) - now : 0);
+  const remainingMs = Math.max(
+    cooling ? ctx.cooldownUntil - now : 0,
+    inlineWait ? (ctx.inlineUntil ?? 0) - now : 0,
+  );
   const recentLimit = !!l && now - l.at < LIMIT_WINDOW_MS;
   const state: LimitStateKey = !ctx.online
     ? "offline"

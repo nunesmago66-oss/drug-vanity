@@ -110,11 +110,7 @@ const ERROR_KINDS: readonly string[] = [
 
 /** Where a rate-limit stop came from, so a preventive block is never shown as a Discord 429. */
 export type RateLimitSource =
-  | "discord"
-  | "cloudflare_edge"
-  | "app_block"
-  | "unknown"
-  | "suspected_edge";
+  "discord" | "cloudflare_edge" | "app_block" | "unknown" | "suspected_edge";
 
 export function rateLimitSourceOf(
   r: Pick<CheckResult, "httpStatus" | "discordQueried"> & { limitLayer?: LimitLayer | null },

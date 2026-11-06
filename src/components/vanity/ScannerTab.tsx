@@ -560,11 +560,11 @@ export function ScannerTab({
               ? `O Discord retornou limite de taxa (HTTP 429).${scope}`
               : outcome.rateLimitSource === "suspected_edge"
                 ? "A conexão com o Discord falhou logo depois de um limite de taxa — provável bloqueio da proteção Cloudflare (o navegador não consegue ler essa resposta). Para não prolongar o bloqueio, o app parou de enviar consultas."
-              : outcome.rateLimitSource === "cloudflare_edge"
-                ? "A proteção da Cloudflare na frente do Discord bloqueou a consulta (HTTP 429). Esse bloqueio vale para a sua conexão de internet por alguns minutos."
-                : outcome.rateLimitSource === "app_block"
-                  ? "Bloqueio preventivo do app: um limite de taxa do Discord recebido há pouco ainda está ativo, por isso nenhuma consulta foi enviada ao Discord."
-                  : "Limite de taxa (HTTP 429) — não foi possível confirmar se veio do Discord ou de um bloqueio preventivo do app.";
+                : outcome.rateLimitSource === "cloudflare_edge"
+                  ? "A proteção da Cloudflare na frente do Discord bloqueou a consulta (HTTP 429). Esse bloqueio vale para a sua conexão de internet por alguns minutos."
+                  : outcome.rateLimitSource === "app_block"
+                    ? "Bloqueio preventivo do app: um limite de taxa do Discord recebido há pouco ainda está ativo, por isso nenhuma consulta foi enviada ao Discord."
+                    : "Limite de taxa (HTTP 429) — não foi possível confirmar se veio do Discord ou de um bloqueio preventivo do app.";
           const asked =
             limit?.discordQueried === true && limit.retryAfterSeconds != null
               ? ` Espera pedida: ${secondsLabel(limit.retryAfterSeconds * 1000)}; com margem de segurança${count > 1 ? ` e recuo progressivo (${count} limites em 10 min)` : ""}: ${mmss(secs)}.`
@@ -668,9 +668,7 @@ export function ScannerTab({
         : stats.tested > 0 || stats.limited > 0
           ? "pausada"
           : "parada";
-  const diag = localBackground
-    ? validateDiag(background?.snapshot?.diag ?? diagLocal)
-    : diagLocal;
+  const diag = localBackground ? validateDiag(background?.snapshot?.diag ?? diagLocal) : diagLocal;
   const diagView = describeDiag(diag, {
     cooldownUntil,
     now,

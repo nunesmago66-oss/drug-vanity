@@ -22,7 +22,12 @@ import { loadPace, paceAfterLimit, recentLimitCount, savePace } from "@/lib/vani
 
 import { StatusBadge } from "./shared";
 import { acquireScanLock, type ScanLock } from "@/lib/vanity/scan-lock";
-import { inlineLimitWaitMs, noteLimit, noteResponse, updateDiag } from "@/lib/vanity/rate-limit-manager";
+import {
+  inlineLimitWaitMs,
+  noteLimit,
+  noteResponse,
+  updateDiag,
+} from "@/lib/vanity/rate-limit-manager";
 import { backgroundEnabled, backgroundCheck } from "@/lib/vanity/background-browser";
 
 interface Props {

@@ -47,7 +47,12 @@ const base = { batchLimit: Infinity, intervalMs: 0, shouldStop: () => false };
 describe("central rate-limit manager", () => {
   it("1. normal operation: every code checked once, no waits beyond the pace", async () => {
     const check = vi.fn(async (c: string) => ok(c));
-    const out = await runVerificationQueue({ ...base, codes: ["aa", "ab", "ac"], sleep: async () => {}, check });
+    const out = await runVerificationQueue({
+      ...base,
+      codes: ["aa", "ab", "ac"],
+      sleep: async () => {},
+      check,
+    });
     expect(out.reason).toBe("done");
     expect(check).toHaveBeenCalledTimes(3);
   });
@@ -71,8 +76,9 @@ describe("central rate-limit manager", () => {
     expect(out.reason).toBe("done");
     expect(out.checked).toBe(3);
     expect(check.mock.calls.map((c) => c[0])).toEqual(["aa", "ab", "ab", "ac"]);
-    // 0.3 s × 1.2 + 1 s margin = 1360 ms, never shorter than Discord's wait.
-    expect(sleeps).toContain(1360);
+    // Wait after the 429 ≥ 0.3 s × 1.2 + 1 s margin (1360 ms) and ≥ the slowed pace.
+    expect(sleeps[1]).toBeGreaterThanOrEqual(1360);
+    expect(sleeps[1]).toBe(2500);
   });
 
   it("3. global limit stops into a cooldown instead of an inline retry", () => {
@@ -94,15 +100,28 @@ describe("central rate-limit manager", () => {
       "x-ratelimit-scope": "user",
     });
     const ev = readLimitEvidence(h, '{"retry_after":0.3,"global":false}');
-    expect(ev).toMatchObject({ layer: "discord_api", scope: "user", global: false, retryAfterSeconds: 1 });
+    expect(ev).toMatchObject({
+      layer: "discord_api",
+      scope: "user",
+      global: false,
+      retryAfterSeconds: 1,
+    });
     // Browser view: headers are not exposed by CORS, only the body is readable.
-    const b = readLimitEvidence(new Headers({ "content-type": "application/json" }), '{"retry_after":0.734,"global":false}');
+    const b = readLimitEvidence(
+      new Headers({ "content-type": "application/json" }),
+      '{"retry_after":0.734,"global":false}',
+    );
     expect(b).toMatchObject({ layer: "discord_api", retryAfterSeconds: 0.734 });
   });
 
   it("6. repeated 429 on the same code escalates to a stop after the inline limit", async () => {
     const check = vi.fn(async (c: string) => route429(c, 0.3));
-    const out = await runVerificationQueue({ ...base, codes: ["aa", "ab"], sleep: async () => {}, check });
+    const out = await runVerificationQueue({
+      ...base,
+      codes: ["aa", "ab"],
+      sleep: async () => {},
+      check,
+    });
     expect(out.reason).toBe("rate_limited");
     expect(check).toHaveBeenCalledTimes(MAX_INLINE_LIMIT_RETRIES + 1);
     expect(out.checked).toBe(0);
@@ -121,9 +140,20 @@ describe("central rate-limit manager", () => {
     const check = vi.fn(async (c: string): Promise<CheckResult> => {
       n++;
       if (n === 1) return route429(c, 0.3, { limitGlobal: true });
-      return { ...ok(c), status: "inconclusive", httpStatus: null, discordQueried: null, errorKind: "network" };
+      return {
+        ...ok(c),
+        status: "inconclusive",
+        httpStatus: null,
+        discordQueried: null,
+        errorKind: "network",
+      };
     });
-    const first = await runVerificationQueue({ ...base, codes: ["aa"], sleep: async () => {}, check });
+    const first = await runVerificationQueue({
+      ...base,
+      codes: ["aa"],
+      sleep: async () => {},
+      check,
+    });
     const out = await runVerificationQueue({
       ...base,
       codes: ["aa"],
@@ -142,12 +172,22 @@ describe("central rate-limit manager", () => {
     d = noteLimit(d, route429("aa", 0.3), { inline: false, appUntil: now + 5000 }, now);
     expect(d.requests).toBe(1);
     expect(d.limited).toBe(1);
-    const view = describeDiag(d, { cooldownUntil: now + 5000, now: now + 1000, running: false, online: true });
+    const view = describeDiag(d, {
+      cooldownUntil: now + 5000,
+      now: now + 1000,
+      running: false,
+      online: true,
+    });
     expect(view.state).toBe("cooldown");
     expect(view.origin).toBe("Discord (API)");
     expect(view.remainingSeconds).toBe(4);
     expect(view.external).toMatch(/terminou/);
-    const later = describeDiag(d, { cooldownUntil: now + 5000, now: now + 6000, running: false, online: true });
+    const later = describeDiag(d, {
+      cooldownUntil: now + 5000,
+      now: now + 6000,
+      running: false,
+      online: true,
+    });
     expect(later.normal).toBe(true);
     // A tampered saved record cannot break the view.
     expect(validateDiag({ v: 1, requests: -5, lastLimit: { origin: "nope" } }).requests).toBe(0);
@@ -171,7 +211,11 @@ describe("recovery across restarts (real Node background engine)", () => {
       c === "ab" && blocked ? route429(c, 0.2, { limitGlobal: true }) : ok(c);
     const engine = new BackgroundEngine(file, answer);
     try {
-      await engine.start({ ...emptyBackground(), codes: ["aa", "ab", "ac"], pace: { ...initialPace(), intervalMs: 1000 } });
+      await engine.start({
+        ...emptyBackground(),
+        codes: ["aa", "ab", "ac"],
+        pace: { ...initialPace(), intervalMs: 1000 },
+      });
       await until(() => engine.state.status === "rate_limited");
       expect(Object.keys(engine.state.results)).toEqual(["aa"]);
       expect(engine.state.diag?.limited).toBe(1);
@@ -201,7 +245,11 @@ describe("recovery across restarts (real Node background engine)", () => {
       ).rejects.toThrow("limite de taxa");
       expect(check).not.toHaveBeenCalled();
       // While a run is active, the quick check cannot add a parallel request.
-      await engine.start({ ...emptyBackground(), codes: ["aa", "ab"], pace: { ...initialPace(), intervalMs: 1000 } });
+      await engine.start({
+        ...emptyBackground(),
+        codes: ["aa", "ab"],
+        pace: { ...initialPace(), intervalMs: 1000 },
+      });
       await expect(engine.quick("zz")).rejects.toThrow("Outra verificação");
       await until(() => engine.state.status === "done");
       await engine.stop();
