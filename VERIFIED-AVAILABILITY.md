@@ -1,7 +1,20 @@
 # VERIFIED AVAILABILITY — DRUG URL V7
 
-Cada código verificado recebe um dos estados: `CONFIRMED_FREE`, `ACTIVE`, `INVALID`,
-`EXPIRED`, `REVOKED`, `BLOCKED`, `UNKNOWN`. Regras em `src/lib/vanity/availability.ts`.
+Cada código verificado recebe exatamente uma categoria (regras em
+`src/lib/vanity/availability.ts`):
+
+| Estado           | No site           |
+| ---------------- | ----------------- |
+| `ACTIVE`         | Ativa             |
+| `NOT_IN_USE`     | Não está em uso   |
+| `CONFIRMED_FREE` | Liberada          |
+| `EXPIRED`        | Expirada          |
+| `REVOKED`        | Revogada          |
+| `BLOCKED`        | Bloqueada         |
+| `UNKNOWN`        | Indefinida        |
+| `INVALID`        | Inválida (só aparece quando existe algum resultado assim) |
+
+"Não está em uso" e "Liberada" são categorias diferentes e nunca se misturam.
 
 ## Como cada estado é atribuído
 
@@ -12,7 +25,7 @@ Cada código verificado recebe um dos estados: `CONFIRMED_FREE`, `ACTIVE`, `INVA
 | HTTP 200 com corpo inesperado                          | UNKNOWN         |
 | HTTP 400 / formato de código inválido                  | INVALID         |
 | HTTP 403                                               | BLOCKED         |
-| HTTP 404 (erro 10006 Unknown Invite)                   | UNKNOWN         |
+| HTTP 404 (erro 10006 Unknown Invite)                   | NOT_IN_USE      |
 | HTTP 429 (Retry-After respeitado, código fica pendente)| UNKNOWN         |
 | 5xx, timeout, falha de conexão, resposta desconhecida  | UNKNOWN         |
 | Bloqueio preventivo do app (Discord não consultado)    | UNKNOWN         |
@@ -30,6 +43,20 @@ Cada código verificado recebe um dos estados: `CONFIRMED_FREE`, `ACTIVE`, `INVA
   inexistência; ele nunca é atribuído a partir da API pública.
 - Ao carregar dados/backup, um estado salvo incoerente com o HTTP (ex.: `CONFIRMED_FREE`
   com 429) é rejeitado.
+
+## Opção LIBERADAS no site
+
+Painel → "Todas as combinações" ou "URLs com significado" → botão **Liberadas (n)**, ao lado
+de **Não estão em uso (n)**. Cada botão mostra só a sua categoria; a busca, o filtro de
+comprimento, favoritos e ordenação continuam valendo; **CSV** exporta só a lista filtrada
+(`vanity-liberadas.csv`). Os contadores por categoria aparecem nos Resultados e na Visão
+geral; o histórico do Painel filtra por categoria. Como o Discord não oferece confirmação
+oficial pública, a lista LIBERADAS fica vazia até existir uma confirmação oficial autorizada;
+HTTP 404, expirados, erros e 429 nunca entram nela.
+
+A categoria é salva com o resultado, no histórico (7º campo opcional), no estado do helper
+em segundo plano e no backup — exportar o backup no PC e importar no iPhone (ou o contrário)
+mantém as categorias. Valores incoerentes com o HTTP são rejeitados ao carregar.
 
 ## Persistência
 

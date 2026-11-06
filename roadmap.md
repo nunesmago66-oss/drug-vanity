@@ -121,3 +121,9 @@
 - [ ] Fila sem duplicatas (inclusive reaproveitando resultados do outro modo), salvamento periódico eficiente.
 - [ ] Estimativa pelo ritmo real; painel com consultas/min, tempo médio, estado da fila e espera.
 - [ ] Testes, lint, typecheck, build; ZIP antes (feito) e depois.
+
+## Filtro LIBERADAS (2026-11-06)
+- [x] Categoria "Não está em uso" (404) separada de "Liberada" (só confirmação oficial); contadores exclusivos.
+- [x] Filtros, contadores, CSV por categoria em Resultados; categorias no Painel, histórico e verificação rápida.
+- [x] Persistência, helper em segundo plano, histórico e backup preservam/validam a categoria; 15 testes novos.
+- [x] Sugerir próximos passos após o remix (respondido).
