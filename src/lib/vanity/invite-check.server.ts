@@ -7,7 +7,12 @@ import {
 import { describeError, inviteUrl, newRequestId } from "./invite-check.browser";
 
 import { classifyAvailability, readInviteBody } from "./availability";
-import { readLimitEvidence, readNextAllowed } from "./invite-response";
+import {
+  explainLimitOrigin,
+  readLimitEvidence,
+  readLimitHeaders,
+  readNextAllowed,
+} from "./invite-response";
 import { createLimiter } from "./server-limiter";
 
 export { readLimitEvidence, readNextAllowed, type LimitEvidence } from "./invite-response";
@@ -16,6 +21,18 @@ export { readLimitEvidence, readNextAllowed, type LimitEvidence } from "./invite
 // per-visitor gap, one in-flight request per visitor, progressive 429 block).
 // The browser queue is the primary limiter.
 const limiter = createLimiter();
+
+// Requests this isolate really sent to Discord (last 10 s), as 429 evidence.
+let sentAt: number[] = [];
+function noteSent(now: number) {
+  sentAt = [...sentAt.filter((t) => now - t < 10_000), now].slice(-200);
+}
+function sentCounts(now: number) {
+  return {
+    sent1s: sentAt.filter((t) => now - t < 1000).length,
+    sent10s: sentAt.filter((t) => now - t < 10_000).length,
+  };
+}
 
 function result(code: string, partial: Omit<CheckResult, "code" | "checkedAt">): CheckResult {
   return { code, checkedAt: new Date().toISOString(), ...partial };
@@ -77,6 +94,7 @@ export async function checkInviteOnDiscord(
   }
 
   try {
+    noteSent(Date.now());
     const res = await fetch(url, {
       method: "GET",
       headers: {
@@ -97,19 +115,12 @@ export async function checkInviteOnDiscord(
         /* ignore */
       }
       const ev = readLimitEvidence(res.headers, text);
+      const raw = readLimitHeaders(429, res.headers, text, sentCounts(Date.now()));
       // Discord's wait + safety margin, longer when 429s repeat; blocks every visitor.
       const blocked = limiter.recordLimit(ev.retryAfterSeconds);
+      const origin = explainLimitOrigin(raw, ev.layer);
       // Diagnostic only: no user data, no IPs, no credentials.
-      console.warn("discord 429", {
-        code,
-        layer: ev.layer ?? "unknown",
-        scope: ev.scope,
-        global: ev.global,
-        retryAfter: ev.retryAfterSeconds,
-        blockedFor: blocked,
-        contentType: res.headers.get("content-type"),
-        cfRay: res.headers.get("cf-ray"),
-      });
+      console.warn("discord 429", { code, layer: ev.layer ?? "unknown", blockedFor: blocked, ...raw });
       const who =
         ev.layer === "cloudflare_edge"
           ? "A proteção da Cloudflare na frente do Discord bloqueou a consulta (HTTP 429)."
@@ -121,7 +132,8 @@ export async function checkInviteOnDiscord(
         // Discord's own wait (null when it gave none); the padded block is separate.
         retryAfterSeconds: ev.retryAfterSeconds,
         blockedForSeconds: blocked,
-        reason: `${who}${scope} Tente após ${blocked}s.`,
+        reason: `${who}${scope} ${origin} Tente após ${blocked}s.`,
+        limitHeaders: raw,
         discordQueried: true,
         limitLayer: ev.layer,
         limitScope: ev.scope,
@@ -153,6 +165,7 @@ export async function checkInviteOnDiscord(
         discordQueried: true,
         errorKind: "edge_challenge",
         availability: "UNKNOWN",
+        limitHeaders: readLimitHeaders(res.status, res.headers, bodyText, sentCounts(Date.now())),
         trace: trace(),
       });
     }
