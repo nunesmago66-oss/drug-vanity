@@ -44,14 +44,14 @@ describe("safe persistence", () => {
       true,
     );
   });
-  it("recovers partial settings and preserves the 1-second floor", () => {
+  it("recovers partial settings and preserves the 1.5-second floor", () => {
     expect(
       validateSavedData(
         "dvf:scanner-config:v1",
         { intervalMs: 1, len2: false },
         DEFAULT_SCANNER_CONFIG,
       ).value,
-    ).toEqual({ ...DEFAULT_SCANNER_CONFIG, intervalMs: 1000, len2: false });
+    ).toEqual({ ...DEFAULT_SCANNER_CONFIG, intervalMs: 1500, len2: false });
   });
   it("preserves catalog edits, favorites and selection", () => {
     const catalog = [

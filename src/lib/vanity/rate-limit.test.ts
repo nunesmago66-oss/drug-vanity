@@ -78,7 +78,7 @@ describe("central rate-limit manager", () => {
     expect(check.mock.calls.map((c) => c[0])).toEqual(["aa", "ab", "ab", "ac"]);
     // Wait after the 429 ≥ 0.3 s × 1.2 + 1 s margin (1360 ms) and ≥ the slowed pace.
     expect(sleeps[1]).toBeGreaterThanOrEqual(1360);
-    expect(sleeps[1]).toBe(2500);
+    expect(sleeps[1]).toBe(3750);
   });
 
   it("3. global limit stops into a cooldown instead of an inline retry", () => {
@@ -130,7 +130,7 @@ describe("central rate-limit manager", () => {
   it("6b. an old slowdown expires: no 429 in 10 min resets the pace to normal", () => {
     const now = 100 * LIMIT_WINDOW_MS;
     const slow = { ...initialPace(), intervalMs: 30_000, limits: [now - LIMIT_WINDOW_MS - 1] };
-    expect(validatePace(slow, now)?.intervalMs).toBe(2000);
+    expect(validatePace(slow, now)?.intervalMs).toBe(3000);
     const recent = { ...slow, limits: [now - 1000] };
     expect(validatePace(recent, now)?.intervalMs).toBe(30_000);
   });

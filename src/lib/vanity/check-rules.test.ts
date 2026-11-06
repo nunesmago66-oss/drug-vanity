@@ -40,8 +40,8 @@ describe("classifyHttpStatus", () => {
 });
 
 describe("limits", () => {
-  it("never goes below the 1 s request floor", () => expect(MIN_INTERVAL_MS).toBe(1000));
-  it("a too-fast fixed choice is clamped and the automatic pace starts at 2 s", async () => {
+  it("never goes below the 1.5 s request floor", () => expect(MIN_INTERVAL_MS).toBe(1500));
+  it("a too-fast fixed choice is clamped and the automatic pace starts at 3 s", async () => {
     const sleep = vi.fn(async () => {});
     await runVerificationQueue({
       codes: ["aa", "bb"],
@@ -51,7 +51,7 @@ describe("limits", () => {
       shouldStop: () => false,
       check: async (c) => res(c, 404),
     });
-    expect(sleep).toHaveBeenCalledWith(2000);
+    expect(sleep).toHaveBeenCalledWith(3000);
   });
 });
 
