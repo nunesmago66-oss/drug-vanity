@@ -1,8 +1,12 @@
-import { AVAILABILITY_KEYS, storedAvailabilityIsConsistent } from "./availability";
 import { isValidCode, classifyHttpStatus } from "./check-rules";
 import { initialPace, validatePace, type PaceState } from "./pacing";
 import { emptyDiag, validateDiag, type RateLimitDiag } from "./rate-limit-manager";
-import { DEFAULT_SCANNER_CONFIG, type ResultsMap, type ScannerConfig } from "./scanner";
+import {
+  DEFAULT_SCANNER_CONFIG,
+  sanitizeCompact,
+  type ResultsMap,
+  type ScannerConfig,
+} from "./scanner";
 import { EMPTY_STATS, validateStats, type StatsLog } from "./stats";
 
 export type BackgroundMode = "a" | "m";
@@ -54,19 +58,21 @@ export function validateResults(raw: unknown): ResultsMap {
       !isValidCode(code) ||
       !Array.isArray(r) ||
       r.length < 3 ||
-      r.length > 5 ||
+      r.length > 6 ||
       !(r[1] === null || (Number.isInteger(r[1]) && r[1] >= 100 && r[1] <= 599)) ||
       !Number.isFinite(r[2]) ||
       r[2] < 0 ||
-      (r.length >= 4 && !(r[3] === null || ["d", "c", "t", "f", "a"].includes(r[3]))) ||
-      (r.length === 5 &&
-        !(AVAILABILITY_KEYS.includes(r[4]) && storedAvailabilityIsConsistent(r[1], r[4])))
+      (r.length >= 4 && !(r[3] === null || ["d", "c", "t", "f", "a"].includes(r[3])))
     )
       throw new Error("Resultado corrompido");
     const status = classifyHttpStatus(r[1]);
     const expected = status === "exists" ? "e" : status === "not_found" ? "n" : "x";
     if (r[0] !== expected) throw new Error("Classificação inválida");
-    out[code] = r as ResultsMap[string];
+    // Safe migration: an availability key without supporting evidence (e.g. a
+    // legacy "F" with no official confirmation for this code) is dropped.
+    const rec = sanitizeCompact(code, r);
+    if (!rec) throw new Error("Resultado corrompido");
+    out[code] = rec;
   }
   return out;
 }

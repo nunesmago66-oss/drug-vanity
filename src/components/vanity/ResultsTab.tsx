@@ -130,7 +130,7 @@ export function ResultsTab({
   );
   const list = useMemo(() => {
     const filtered = all.filter(([code, r]) => {
-      if (filter !== "all" && availabilityOf(r) !== filter) return false;
+      if (filter !== "all" && availabilityOf(r, code) !== filter) return false;
       if (length !== "all" && code.length !== Number(length)) return false;
       if (onlyFavorites && !favorites.has(code)) return false;
       if (
@@ -196,15 +196,15 @@ export function ResultsTab({
           r[1] ?? "",
           new Date(r[2] * 1000).toISOString(),
           meanings.get(code) ?? "",
-          availabilityOf(r) === "CONFIRMED_FREE"
+          availabilityOf(r, code) === "CONFIRMED_FREE"
             ? ""
             : r[0] === "n"
               ? NOT_FOUND_WARNING
               : r[0] === "x"
                 ? describeResult(r)
                 : "",
-          availabilityOf(r),
-          AVAILABILITY_LABEL[availabilityOf(r)],
+          availabilityOf(r, code),
+          AVAILABILITY_LABEL[availabilityOf(r, code)],
         ]),
       ),
     );
@@ -428,7 +428,7 @@ export function ResultsTab({
                 <p className="mt-1 text-xs text-muted-foreground">
                   Verified Availability:{" "}
                   <span className="font-medium text-foreground">
-                    {AVAILABILITY_LABEL[availabilityOf(r)]}
+                    {AVAILABILITY_LABEL[availabilityOf(r, code)]}
                   </span>
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2 border-t pt-2">

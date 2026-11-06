@@ -156,8 +156,9 @@ describe("Persistence and resume", () => {
   it("tampered CONFIRMED_FREE on a 429 or 200 is rejected on load", () => {
     expect(storedAvailabilityIsConsistent(429, "F")).toBe(false);
     expect(storedAvailabilityIsConsistent(200, "F")).toBe(false);
+    // Safe migration: the code and its check are kept, the unsupported "F" is dropped.
     const saved = validateStored("vanity-scan-results", { abc: ["x", 429, 1, "d", "F"] });
-    expect(saved).toEqual({});
+    expect(saved).toEqual({ abc: ["x", 429, 1, "d"] });
   });
   it("resume: rate-limited codes still need a check, answered ones do not", async () => {
     const limited = await check("abc", async () => json(429, { retry_after: 1 }));

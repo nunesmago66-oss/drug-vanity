@@ -250,7 +250,7 @@ export function QuickCheck({
               retryAfterSeconds: null,
               reason: "",
               checkedAt: new Date(saved[2] * 1000).toISOString(),
-              availability: availabilityOf(saved),
+              availability: availabilityOf(saved, code),
             })
           }
           className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-dashed bg-background/40 p-3 text-left"
@@ -259,7 +259,9 @@ export function QuickCheck({
           <StatusBadge
             status={saved[0] === "e" ? "exists" : saved[0] === "n" ? "not_found" : "inconclusive"}
           />
-          <span className="text-xs font-medium">{AVAILABILITY_LABEL[availabilityOf(saved)]}</span>
+          <span className="text-xs font-medium">
+            {AVAILABILITY_LABEL[availabilityOf(saved, code)]}
+          </span>
         </button>
       )}
     </section>

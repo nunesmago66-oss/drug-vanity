@@ -180,6 +180,7 @@ export async function checkInviteOnDiscord(
         status === "inconclusive" ? (res.status >= 500 ? "server_error" : "unexpected") : null,
       discordErrorCode: evidence.discordErrorCode ?? null,
       expiresAt: evidence.expiresAt ?? null,
+      inviteBodyValid: evidence.inviteBodyValid ?? null,
       availability: classifyAvailability({
         code,
         httpStatus: res.status,

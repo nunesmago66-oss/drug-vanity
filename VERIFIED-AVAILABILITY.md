@@ -97,9 +97,10 @@ bun run start:rebuild  # força nova geração após atualizar o código
 
 ## iPhone / iPad (Safari)
 
-O site funciona no Safari do iPhone: o scanner consulta o Discord direto do aparelho,
+O site funciona no Safari do iPhone: o scanner consulta o Discord pelo servidor do próprio site,
 com o mesmo Adaptive Pacing e Verified Availability, e o progresso fica salvo no próprio
-iPhone (sobrevive a recarregar/fechar). O Background Helper é só para PC.
+iPhone (sobrevive a recarregar/fechar). O Background Helper é só para PC e consulta o
+Discord diretamente a partir do PC.
 
 Limitação do iOS: o Safari pausa a varredura quando você troca de app ou bloqueia a tela;
 ao voltar, toque em "Retomar". PC e iPhone têm históricos separados (use Backup →
@@ -125,3 +126,14 @@ O DRUG URL abre em tela cheia, com ícone próprio, respeitando notch e barra in
 - Um ritmo lento antigo volta ao normal depois de 10 min sem 429.
 - Scanner → Progresso → "Diagnóstico do limite" mostra conexão, estado, origem, rota, tempo restante, requisições, respostas 429, recuperação e se o bloqueio do Discord ainda está ativo ou se resta só a margem do app.
 - Um bloqueio nunca vira resultado: o código continua pendente.
+
+## Liberadas: evidência exigida
+
+Um resultado só aparece como **Liberada** (`CONFIRMED_FREE`) quando HTTP 404 vem acompanhado de um
+objeto de confirmação oficial (`source: "discord_official"`, `available: true`, `operation`,
+`confirmedAt` válido) **para o mesmo código**, guardado junto do registro. A chave salva "F" sozinha
+não basta: registros antigos com "F" sem essa confirmação são migrados com segurança para
+**Não está em uso** (o código e a verificação são preservados). Respostas do servidor nunca podem
+se autodeclarar "Liberada", e HTTP 200 com corpo inválido ou ilegível fica **Indefinida**, nunca Ativa.
+A confirmação é validada quanto à forma e ao vínculo com o código; não há assinatura criptográfica,
+porque o Discord não oferece nenhuma operação pública que a emita.

@@ -55,7 +55,7 @@ const result = (code: string, over: Partial<CheckResult>): CheckResult => ({
 const sample: ResultsMap = {
   ab: ["e", 200, 10],
   ac: ["n", 404, 11],
-  ad: ["n", 404, 12, null, "F"],
+  ad: ["n", 404, 12, null, "F", official("ad")],
   ae: ["e", 200, 13, null, "E"],
   af: ["x", 403, 14, "d"],
   ag: ["x", 429, 15, "d"],
@@ -95,7 +95,9 @@ describe("NÃO ESTÁ EM USO vs LIBERADA", () => {
       officialConfirmation: official("abc"),
     });
     expect(a).toBe("CONFIRMED_FREE");
-    const saved = toCompact(result("abc", { availability: a }));
+    const saved = toCompact(
+      result("abc", { availability: a, officialConfirmation: official("abc") }),
+    );
     expect(availabilityOf(saved)).toBe("CONFIRMED_FREE");
   });
   it("a confirmation on a 429, error or for another code is not LIBERADA", () => {
@@ -163,9 +165,12 @@ describe("Persistence, restart, history and PC ↔ iPhone backup", () => {
     expect(countAvailability(restored)).toEqual(countAvailability(sample));
   });
   it("a tampered LIBERADA on a 429 is rejected everywhere", () => {
-    expect(() => validateResults({ ab: ["x", 429, 1, "d", "F"] })).toThrow();
+    // Migrated, never deleted: the record stays, its category becomes INDEFINIDA.
+    const bg = validateResults({ ab: ["x", 429, 1, "d", "F"] });
+    expect(bg).toEqual({ ab: ["x", 429, 1, "d"] });
+    expect(availabilityOf(bg["ab"]!)).toBe("UNKNOWN");
     const { value } = validateSavedData("vanity-scan-results", { ab: ["x", 429, 1, "d", "F"] }, {});
-    expect(value).toEqual({});
+    expect(value).toEqual({ ab: ["x", 429, 1, "d"] });
   });
   it("history records the category and rejects inconsistent ones", () => {
     let stats = recordCheck(EMPTY_STATS, {
@@ -176,6 +181,7 @@ describe("Persistence, restart, history and PC ↔ iPhone backup", () => {
       mode: "a",
       responseMs: 50,
       availability: "CONFIRMED_FREE",
+      officialConfirmation: official("ad"),
     });
     stats = recordCheck(stats, {
       code: "ac",
@@ -189,7 +195,7 @@ describe("Persistence, restart, history and PC ↔ iPhone backup", () => {
     const reloaded = validateStats(JSON.parse(JSON.stringify(stats)))!;
     expect(reloaded.recent.map(historyAvailability)).toEqual(["NOT_IN_USE", "CONFIRMED_FREE"]);
     const tampered = { ...stats, recent: [["ab", "x", 429, 1, "a", null, "F"]] };
-    expect(validateStats(tampered)!.recent).toEqual([]);
+    expect(validateStats(tampered)!.recent.map(historyAvailability)).toEqual(["UNKNOWN"]);
   });
   it("backup from one device restores the categories on another", () => {
     const defaults: BackupData = {

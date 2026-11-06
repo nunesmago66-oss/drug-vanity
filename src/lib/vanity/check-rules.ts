@@ -17,7 +17,7 @@ import {
   type LimitKind,
   type PaceState,
 } from "./pacing";
-import { classifyAvailability, type Availability } from "./availability";
+import { classifyAvailability, type Availability, type OfficialConfirmation } from "./availability";
 import { inlineLimitWaitMs, isSuspectedEdgeBlock } from "./rate-limit-manager";
 
 export { DEFAULT_429_WAIT_SECONDS, MAX_SERVER_WAIT_SECONDS };
@@ -84,6 +84,13 @@ export interface CheckResult {
   discordErrorCode?: number | null;
   /** `expires_at` of the invite when Discord returned one. */
   expiresAt?: string | null;
+  /**
+   * HTTP 200 body evidence: true = real invite object for this code,
+   * false/null = invalid or unreadable body (never ACTIVE).
+   */
+  inviteBodyValid?: boolean | null;
+  /** Official confirmation bound to this code; the only way to "Liberada". */
+  officialConfirmation?: OfficialConfirmation | null;
   /** What really happened on the wire for this attempt (no tokens, no user data). */
   trace?: RequestTrace | null;
 }
@@ -274,6 +281,10 @@ export function normalizeCheckResult(code: string, raw: unknown): CheckResult {
       : null;
   const discordErrorCode = typeof r.discordErrorCode === "number" ? r.discordErrorCode : null;
   const expiresAt = http === 200 && typeof r.expiresAt === "string" ? r.expiresAt : null;
+  // Body evidence of a 200 is preserved: only an explicit `true` is valid;
+  // false/null/malformed → false (UNKNOWN). Absent → legacy (no evidence carried).
+  const inviteBodyValid =
+    http !== 200 ? null : r.inviteBodyValid === undefined ? undefined : r.inviteBodyValid === true;
   const discordQueried =
     status !== "inconclusive"
       ? true
@@ -291,9 +302,14 @@ export function normalizeCheckResult(code: string, raw: unknown): CheckResult {
       discordQueried,
       errorKind,
       expiresAt,
+      ...(inviteBodyValid !== undefined ? { inviteBodyValid } : {}),
+      // officialConfirmation is deliberately NOT taken from a reply: no backend
+      // produces one (Discord has no such public operation), so a wire answer
+      // can never make itself "Liberada".
     }),
     discordErrorCode,
     expiresAt,
+    ...(inviteBodyValid !== undefined ? { inviteBodyValid } : {}),
     // Re-derive status from the HTTP code so a 404 can never be shown as anything else.
     status: classifyHttpStatus(http),
     httpStatus: http,

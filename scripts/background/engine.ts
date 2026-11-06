@@ -25,7 +25,17 @@ import {
   type BackgroundSnapshot,
 } from "../../src/lib/vanity/background-protocol";
 
-/** Local Node only. A checkpoint is durable before the next Discord request. */
+/**
+ * Local Node only. A checkpoint is durable before the next Discord request.
+ *
+ * DIRECT DISCORD QUERY: unlike the web pages (which go through the site's
+ * same-origin backend `/api/public/invites/$code`), the Background Helper calls
+ * `https://discord.com/api/v10/invites/{code}` directly from the user's PC via
+ * `checkInviteFromBrowser` (plain Node fetch — no CORS in Node). It uses the
+ * same queue, pacing, Retry-After / X-RateLimit handling and 429 cooldowns as
+ * the site, from the PC's single own connection. There is NO IP rotation, proxy,
+ * account rotation or any rate-limit bypass, and none must be added.
+ */
 export class BackgroundEngine {
   state = emptyBackground();
   private stopRequested = false;

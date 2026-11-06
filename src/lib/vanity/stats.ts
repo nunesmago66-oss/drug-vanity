@@ -10,6 +10,9 @@ import {
   availabilityFromHttp,
   emptyAvailabilityCounts,
   storedAvailabilityIsConsistent,
+  isOfficialConfirmation,
+  migrateStoredAvailability,
+  type OfficialConfirmation,
   type Availability,
   type AvailabilityCounts,
   type AvailabilityKey,
@@ -37,8 +40,9 @@ export interface DayStats {
   mc: number;
 }
 /**
- * [code, status, http, checkedAt (s), mode, responseMs | null, availability?]
- * The availability key is stored only when the HTTP status does not imply it.
+ * [code, status, http, checkedAt (s), mode, responseMs | null, availability?, confirmation?]
+ * The availability key is stored only when the HTTP status does not imply it;
+ * "F" (Liberada) only together with the official confirmation for that code.
  */
 export type HistoryEntry = [
   string,
@@ -48,11 +52,16 @@ export type HistoryEntry = [
   ScanMode,
   number | null,
   AvailabilityKey?,
+  OfficialConfirmation?,
 ];
 
 /** Category (VERIFIED AVAILABILITY) of a history entry — one per entry. */
 export function historyAvailability(e: HistoryEntry): Availability {
   const key = e[6];
+  if (key === "F")
+    return e[2] === 404 && isOfficialConfirmation(e[0], e[7])
+      ? "CONFIRMED_FREE"
+      : availabilityFromHttp(e[2]);
   return key && KEY_TO_AVAILABILITY[key] ? KEY_TO_AVAILABILITY[key] : availabilityFromHttp(e[2]);
 }
 
@@ -110,6 +119,8 @@ export interface CheckEvent {
   mode: ScanMode;
   responseMs: number | null;
   availability?: Availability;
+  /** Required for "Liberada": official confirmation bound to `code`. */
+  officialConfirmation?: OfficialConfirmation | null;
 }
 
 const STATUS_KEY = { exists: "e", not_found: "n", inconclusive: "x" } as const;
@@ -132,6 +143,7 @@ export function eventFromResult(
     responseMs:
       elapsed !== null && elapsed >= 0 && elapsed <= MAX_LATENCY_MS ? Math.round(elapsed) : null,
     ...(r.availability ? { availability: r.availability } : {}),
+    ...(r.officialConfirmation ? { officialConfirmation: r.officialConfirmation } : {}),
   };
 }
 
@@ -147,7 +159,10 @@ export function recordCheck(stats: StatsLog, ev: CheckEvent): StatsLog {
   ];
   if (ev.availability && ev.availability !== availabilityFromHttp(ev.http)) {
     const key = AVAILABILITY_TO_KEY[ev.availability];
-    if (storedAvailabilityIsConsistent(ev.http, key)) entry.push(key);
+    if (storedAvailabilityIsConsistent(ev.http, key, ev.code, ev.officialConfirmation)) {
+      entry.push(key);
+      if (key === "F") entry.push(ev.officialConfirmation as OfficialConfirmation);
+    }
   }
   return {
     since: stats.since || Math.floor(ev.at / 1000),
@@ -188,7 +203,8 @@ export function seedFromResults(
       at: r[2] * 1000,
       mode,
       responseMs: null,
-      availability: availabilityOf(r),
+      availability: availabilityOf(r, code),
+      officialConfirmation: r[5] ?? null,
     });
   return { ...stats, since: Math.floor(now / 1000), seeded: entries.length };
 }
@@ -209,8 +225,8 @@ function validDay(v: unknown): DayStats | null {
 }
 
 function validEntry(v: unknown): HistoryEntry | null {
-  if (!Array.isArray(v) || (v.length !== 6 && v.length !== 7)) return null;
-  const [code, s, http, ts, mode, ms, avail] = v as unknown[];
+  if (!Array.isArray(v) || v.length < 6 || v.length > 8) return null;
+  const [code, s, http, ts, mode, ms, avail, proof] = v as unknown[];
   if (typeof code !== "string" || !isValidCode(code)) return null;
   if (s !== "e" && s !== "n" && s !== "x") return null;
   if (!(http === null || (count(http) && http >= 100 && http <= 599))) return null;
@@ -220,12 +236,14 @@ function validEntry(v: unknown): HistoryEntry | null {
   const entry: HistoryEntry = [code, s, http as number | null, ts, mode, ms as number | null];
   if (avail !== undefined) {
     // A key that does not match the HTTP evidence (e.g. "liberada" on a 429) is rejected.
-    if (
-      !AVAILABILITY_KEYS.includes(avail as AvailabilityKey) ||
-      !storedAvailabilityIsConsistent(http as number | null, avail as AvailabilityKey)
-    )
-      return null;
-    entry.push(avail as AvailabilityKey);
+    if (!AVAILABILITY_KEYS.includes(avail as AvailabilityKey)) return null;
+    const kept = migrateStoredAvailability(code, http as number | null, avail, proof);
+    if (kept) {
+      entry.push(kept);
+      if (kept === "F") entry.push(proof as OfficialConfirmation);
+    } else if (avail !== "F") return null;
+    // Legacy "F" without an official confirmation: safe migration keeps the
+    // check (404 → NOT_IN_USE) instead of discarding it.
   }
   return entry;
 }
@@ -315,7 +333,7 @@ export function codeTotals(results: ResultsMap, meaningResults: ResultsMap): Cod
     categories: emptyAvailabilityCounts(),
   };
   for (const [code, r] of latest) {
-    t.categories[availabilityOf(r)]++;
+    t.categories[availabilityOf(r, code)]++;
     if (r[0] === "e") t.exists++;
     else if (r[0] === "n") t.notFound++;
     else t.errors++;

@@ -28,13 +28,18 @@ Navegador (limitador principal, `src/lib/vanity/check-rules.ts`):
 - Só uma aba executa a verificação (Web Locks ou transação IndexedDB; se nenhum funcionar, não inicia).
 - O Safari pausa ao trocar de aba ou bloquear a tela; o progresso fica salvo.
 
-Origem das consultas (`src/lib/vanity/invite-check.browser.ts`):
+Origem das consultas:
 
-- O verificador e a varredura consultam o Discord **direto do navegador**, pela internet de quem usa o
-  site (o endpoint público de convites do Discord permite isso). Assim o limite do Discord passa a valer
-  só para o seu próprio uso, e não para o endereço compartilhado da hospedagem.
-- Um 429 continua parando a varredura e exigindo “Retomar” depois da espera; o app nunca troca de rota
-  ou de endereço para fugir do limite.
+- **Site (Scanner, Quick Check, retestes, lote):** a página nunca chama o discord.com. Ela usa
+  `src/lib/vanity/invite-backend.ts` → `GET /api/public/invites/{código}` (mesmo endereço do site) →
+  `checkInviteOnDiscord` em `src/lib/vanity/invite-check.server.ts`, que consulta
+  `https://discord.com/api/v10/invites/{código}`.
+- **Background Helper (PC):** consulta o Discord **diretamente** a partir do PC
+  (`scripts/background/engine.ts` → `invite-check.browser.ts`, fetch do Node), com a mesma fila,
+  o mesmo ritmo e o mesmo respeito a Retry-After/429.
+- Nenhum dos dois usa rotação de IP, proxy, contas ou qualquer forma de contornar o limite do Discord.
+- Respostas 429 curtas são aguardadas e o mesmo código é repetido; limites longos param numa espera
+  salva que retoma sozinha ao terminar (`src/lib/vanity/rate-limit-manager.ts`).
 
 Servidor (`src/lib/vanity/server-limiter.ts`, reserva não usada pela interface atual):
 

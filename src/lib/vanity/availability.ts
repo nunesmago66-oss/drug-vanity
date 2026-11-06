@@ -145,7 +145,10 @@ export function classifyAvailability(e: AvailabilityEvidence): Availability {
 
   const http = e.httpStatus;
   if (http === 200) {
-    if (e.inviteBodyValid === false) return "UNKNOWN";
+    // A 200 is ACTIVE only when the body is a real invite for this code; an
+    // explicit false/null (invalid or unreadable body) proves nothing.
+    // undefined = legacy caller that never carried body evidence.
+    if (e.inviteBodyValid === false || e.inviteBodyValid === null) return "UNKNOWN";
     if (e.expiresAt) {
       const t = Date.parse(e.expiresAt);
       if (Number.isFinite(t) && t <= (e.nowMs ?? Date.now())) return "EXPIRED";
@@ -181,7 +184,8 @@ export function readInviteBody(
     const valid = !!body && typeof body["code"] === "string" && body["code"].toLowerCase() === code;
     return {
       discordErrorCode: null,
-      inviteBodyValid: body === null ? null : valid,
+      // Unparseable / non-object 200 body is malformed, never an invite.
+      inviteBodyValid: valid,
       expiresAt:
         valid && typeof body!["expires_at"] === "string" ? (body!["expires_at"] as string) : null,
     };
@@ -232,14 +236,37 @@ export function availabilityFromHttp(httpStatus: number | null): Availability {
 /**
  * A stored key is accepted only if consistent with the HTTP status, so a
  * tampered backup can never show a 404/429/error as CONFIRMED_FREE.
+ * "F" additionally requires the official confirmation object stored with the
+ * record and bound to the same code; a bare "F" + 404 is NOT enough.
  */
 export function storedAvailabilityIsConsistent(
   httpStatus: number | null,
   key: AvailabilityKey,
+  code?: string,
+  proof?: unknown,
 ): boolean {
   const a = KEY_TO_AVAILABILITY[key];
   if (!a) return false;
   if (a === "EXPIRED") return httpStatus === 200;
-  if (a === "CONFIRMED_FREE") return httpStatus === 404;
+  if (a === "CONFIRMED_FREE")
+    return httpStatus === 404 && typeof code === "string" && isOfficialConfirmation(code, proof);
   return a === availabilityFromHttp(httpStatus) || a === "UNKNOWN";
+}
+
+/**
+ * Safe migration of a stored availability key: a key the evidence does not
+ * support (e.g. legacy "F" without a confirmation for this code) is dropped,
+ * so the record falls back to what its HTTP status implies (404 → NOT_IN_USE)
+ * instead of being deleted. Returns the key to keep, or null.
+ */
+export function migrateStoredAvailability(
+  code: string,
+  httpStatus: number | null,
+  key: unknown,
+  proof?: unknown,
+): AvailabilityKey | null {
+  if (!AVAILABILITY_KEYS.includes(key as AvailabilityKey)) return null;
+  return storedAvailabilityIsConsistent(httpStatus, key as AvailabilityKey, code, proof)
+    ? (key as AvailabilityKey)
+    : null;
 }

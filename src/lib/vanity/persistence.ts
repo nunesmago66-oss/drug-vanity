@@ -1,4 +1,4 @@
-import { AVAILABILITY_KEYS, storedAvailabilityIsConsistent } from "./availability";
+import { sanitizeCompact } from "./scanner";
 import { CATEGORIES, KINDS } from "./catalog";
 import { classifyHttpStatus, isValidCode, MIN_INTERVAL_MS, BATCH_OPTIONS } from "./check-rules";
 import { STATS_KEY, validateStats } from "./stats";
@@ -27,39 +27,11 @@ export function validateSavedData(key: string, input: unknown, initial: unknown)
     const out: Record<string, unknown> = {};
     if (object(value))
       for (const [c, r] of Object.entries(value)) {
-        if (
-          !code(c) ||
-          !Array.isArray(r) ||
-          r.length < 3 ||
-          r.length > 5 ||
-          !["e", "n", "x"].includes(r[0]) ||
-          !(
-            r[1] === null ||
-            (number(r[1]) && Number.isInteger(r[1]) && r[1] >= 100 && r[1] <= 599)
-          ) ||
-          !number(r[2]) ||
-          (r.length >= 4 && !(r[3] === null || ["d", "c", "t", "f", "a"].includes(r[3]))) ||
-          (r.length === 5 &&
-            !(
-              AVAILABILITY_KEYS.includes(r[4]) &&
-              storedAvailabilityIsConsistent(r[1] as number | null, r[4])
-            ))
-        )
-          continue;
-        const status = classifyHttpStatus(r[1]);
-        const rec: unknown[] = [
-          status === "exists" ? "e" : status === "not_found" ? "n" : "x",
-          r[1],
-          r[2],
-        ];
-        // Origin marker (Discord contacted vs app-side block) is kept only on error results.
-        const origin = r.length >= 4 && status === "inconclusive" ? r[3] : null;
-        if (origin) rec.push(origin);
-        if (r.length === 5) {
-          if (!origin) rec.push(null);
-          rec.push(r[4]);
-        }
-        out[c] = rec;
+        if (!code(c) || !Array.isArray(r) || !["e", "n", "x"].includes(r[0])) continue;
+        // Shared validation + safe migration: an unsupported availability key
+        // (legacy "F" without official confirmation) is dropped, record kept.
+        const rec = sanitizeCompact(c, r);
+        if (rec) out[c] = rec;
       }
     result = out;
   } else if (key.includes("catalog")) {

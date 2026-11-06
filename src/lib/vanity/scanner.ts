@@ -3,11 +3,19 @@ import {
   KEY_TO_AVAILABILITY,
   availabilityFromHttp,
   emptyAvailabilityCounts,
+  isOfficialConfirmation,
+  migrateStoredAvailability,
+  type OfficialConfirmation,
   type Availability,
   type AvailabilityCounts,
   type AvailabilityKey,
 } from "./availability";
-import { STATUS_LABEL, type CheckResult, type CheckStatus } from "./check-rules";
+import {
+  STATUS_LABEL,
+  classifyHttpStatus,
+  type CheckResult,
+  type CheckStatus,
+} from "./check-rules";
 
 export const LETTERS = "abcdefghijklmnopqrstuvwxyz";
 export const DIGITS = "0123456789";
@@ -78,9 +86,10 @@ function originOf(r: CheckResult): OriginKey | null {
   return "d";
 }
 /**
- * [status, http status or null, checked-at epoch seconds, origin?, availability?]
+ * [status, http status or null, checked-at epoch seconds, origin?, availability?, confirmation?]
  * The availability key is stored only when it is not implied by the HTTP status
- * (e.g. EXPIRED); origin is then null on non-error results.
+ * (e.g. EXPIRED); origin is then null on non-error results. "F" (Liberada) is
+ * stored only together with the official confirmation object for that code.
  */
 export type CompactResult = [
   StatusKey,
@@ -88,6 +97,7 @@ export type CompactResult = [
   number,
   (OriginKey | null)?,
   AvailabilityKey?,
+  OfficialConfirmation?,
 ];
 export type ResultsMap = Record<string, CompactResult>;
 
@@ -104,26 +114,72 @@ export function toCompact(r: CheckResult): CompactResult {
   const origin = r.status === "inconclusive" ? originOf(r) : null;
   if (origin) base.push(origin);
   const avail = r.availability;
-  if (avail && avail !== availabilityFromHttp(r.httpStatus)) {
+  const proof =
+    avail === "CONFIRMED_FREE" && isOfficialConfirmation(r.code, r.officialConfirmation)
+      ? r.officialConfirmation
+      : null;
+  // "Liberada" without a verifiable confirmation for this code is never stored;
+  // the record keeps what its HTTP status implies (404 → NOT_IN_USE).
+  if (
+    avail &&
+    avail !== availabilityFromHttp(r.httpStatus) &&
+    (avail !== "CONFIRMED_FREE" || proof)
+  ) {
     if (!origin) base.push(null);
     base.push(AVAILABILITY_TO_KEY[avail]);
+    if (proof) base.push(proof);
   }
   return base;
+}
+
+/**
+ * Validates and migrates one stored result for `code` (shared by local storage,
+ * backups and the background state). Returns null only for a structurally
+ * unusable record; an unsupported availability key (e.g. legacy "F" without an
+ * official confirmation) is dropped instead, keeping the record and its check.
+ */
+export function sanitizeCompact(code: string, r: unknown): CompactResult | null {
+  if (!Array.isArray(r) || r.length < 3 || r.length > 6) return null;
+  const http = r[1];
+  if (!(http === null || (Number.isInteger(http) && http >= 100 && http <= 599))) return null;
+  if (typeof r[2] !== "number" || !Number.isFinite(r[2]) || r[2] < 0) return null;
+  if (r.length >= 4 && !(r[3] === null || (ORIGIN_KEYS as readonly unknown[]).includes(r[3])))
+    return null;
+  const status = classifyHttpStatus(http as number | null);
+  const rec: CompactResult = [TO_KEY[status], http as number | null, r[2]];
+  const origin = status === "inconclusive" && r.length >= 4 ? (r[3] as OriginKey | null) : null;
+  if (origin) rec.push(origin);
+  const key =
+    r.length >= 5 ? migrateStoredAvailability(code, http as number | null, r[4], r[5]) : null;
+  if (key) {
+    if (!origin) rec.push(null);
+    rec.push(key);
+    if (key === "F") rec.push(r[5] as OfficialConfirmation);
+  }
+  return rec;
 }
 
 /**
  * VERIFIED AVAILABILITY (category) of a saved result — exactly one per result.
  * Legacy entries derive it from the HTTP status; a stored key always wins.
  */
-export function availabilityOf(c: CompactResult): Availability {
+export function availabilityOf(c: CompactResult, code?: string): Availability {
   const key = c[4];
+  if (key === "F") {
+    // Defense in depth: "Liberada" only with a confirmation bound to the code.
+    const proof = c[5];
+    const bound = code ?? (proof && typeof proof === "object" ? proof.code : undefined);
+    return c[1] === 404 && typeof bound === "string" && isOfficialConfirmation(bound, proof)
+      ? "CONFIRMED_FREE"
+      : availabilityFromHttp(c[1]);
+  }
   return key && KEY_TO_AVAILABILITY[key] ? KEY_TO_AVAILABILITY[key] : availabilityFromHttp(c[1]);
 }
 
 /** Independent per-category counters; every result is counted in exactly one category. */
 export function countAvailability(results: ResultsMap): AvailabilityCounts {
   const counts = emptyAvailabilityCounts();
-  for (const r of Object.values(results)) counts[availabilityOf(r)]++;
+  for (const [code, r] of Object.entries(results)) counts[availabilityOf(r, code)]++;
   return counts;
 }
 
