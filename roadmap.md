@@ -126,4 +126,4 @@
 - [x] Categoria "Não está em uso" (404) separada de "Liberada" (só confirmação oficial); contadores exclusivos.
 - [x] Filtros, contadores, CSV por categoria em Resultados; categorias no Painel, histórico e verificação rápida.
 - [x] Persistência, helper em segundo plano, histórico e backup preservam/validam a categoria; 15 testes novos.
-- [ ] Sugerir próximos passos após o remix (responder ao final).
+- [x] Sugerir próximos passos após o remix (respondido).
