@@ -40,7 +40,8 @@ export async function checkInviteViaBackend(
   const code = normalizeCode(data.code);
   if (!isValidCode(code)) throw new Error("Código inválido: use 2–3 caracteres (a-z, 0-9, -).");
   const id = newRequestId();
-  const url = backendUrl(code);
+  const url = backendPath(code);
+  const target = backendUrl(code);
   const started = Date.now();
   const fail = (
     errorKind: "network" | "timeout" | "app_error",
@@ -77,7 +78,7 @@ export async function checkInviteViaBackend(
 
   let res: Response;
   try {
-    res = await fetchImpl(url, {
+    res = await fetchImpl(target, {
       method: "GET",
       headers: { "X-Request-Id": id },
       cache: "no-store",
