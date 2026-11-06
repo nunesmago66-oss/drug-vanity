@@ -3,8 +3,19 @@
  * real data the app stored: the per-check log written by the scanner and the saved
  * results maps. Nothing is estimated or invented.
  */
+import {
+  AVAILABILITY_KEYS,
+  AVAILABILITY_TO_KEY,
+  KEY_TO_AVAILABILITY,
+  availabilityFromHttp,
+  emptyAvailabilityCounts,
+  storedAvailabilityIsConsistent,
+  type Availability,
+  type AvailabilityCounts,
+  type AvailabilityKey,
+} from "./availability";
 import { classifyHttpStatus, isValidCode, type CheckResult } from "./check-rules";
-import type { ResultsMap, StatusKey } from "./scanner";
+import { availabilityOf, type ResultsMap, type StatusKey } from "./scanner";
 
 export const STATS_KEY = "dvf:stats:v1";
 /** Days of daily aggregates kept (older days stay counted in `total`). */
@@ -25,8 +36,25 @@ export interface DayStats {
   ms: number;
   mc: number;
 }
-/** [code, status, http, checkedAt (s), mode, responseMs | null] */
-export type HistoryEntry = [string, StatusKey, number | null, number, ScanMode, number | null];
+/**
+ * [code, status, http, checkedAt (s), mode, responseMs | null, availability?]
+ * The availability key is stored only when the HTTP status does not imply it.
+ */
+export type HistoryEntry = [
+  string,
+  StatusKey,
+  number | null,
+  number,
+  ScanMode,
+  number | null,
+  AvailabilityKey?,
+];
+
+/** Category (VERIFIED AVAILABILITY) of a history entry — one per entry. */
+export function historyAvailability(e: HistoryEntry): Availability {
+  const key = e[6];
+  return key && KEY_TO_AVAILABILITY[key] ? KEY_TO_AVAILABILITY[key] : availabilityFromHttp(e[2]);
+}
 
 export interface StatsLog {
   /** When the log started (s); 0 = not started yet. */
@@ -81,6 +109,7 @@ export interface CheckEvent {
   at: number;
   mode: ScanMode;
   responseMs: number | null;
+  availability?: Availability;
 }
 
 const STATUS_KEY = { exists: "e", not_found: "n", inconclusive: "x" } as const;
@@ -102,6 +131,7 @@ export function eventFromResult(
     mode,
     responseMs:
       elapsed !== null && elapsed >= 0 && elapsed <= MAX_LATENCY_MS ? Math.round(elapsed) : null,
+    ...(r.availability ? { availability: r.availability } : {}),
   };
 }
 
@@ -115,6 +145,10 @@ export function recordCheck(stats: StatsLog, ev: CheckEvent): StatsLog {
     ev.mode,
     ev.responseMs,
   ];
+  if (ev.availability && ev.availability !== availabilityFromHttp(ev.http)) {
+    const key = AVAILABILITY_TO_KEY[ev.availability];
+    if (storedAvailabilityIsConsistent(ev.http, key)) entry.push(key);
+  }
   return {
     since: stats.since || Math.floor(ev.at / 1000),
     seeded: stats.seeded,
@@ -154,6 +188,7 @@ export function seedFromResults(
       at: r[2] * 1000,
       mode,
       responseMs: null,
+      availability: availabilityOf(r),
     });
   return { ...stats, since: Math.floor(now / 1000), seeded: entries.length };
 }
@@ -174,15 +209,25 @@ function validDay(v: unknown): DayStats | null {
 }
 
 function validEntry(v: unknown): HistoryEntry | null {
-  if (!Array.isArray(v) || v.length !== 6) return null;
-  const [code, s, http, ts, mode, ms] = v;
+  if (!Array.isArray(v) || (v.length !== 6 && v.length !== 7)) return null;
+  const [code, s, http, ts, mode, ms, avail] = v as unknown[];
   if (typeof code !== "string" || !isValidCode(code)) return null;
   if (s !== "e" && s !== "n" && s !== "x") return null;
   if (!(http === null || (count(http) && http >= 100 && http <= 599))) return null;
   if (STATUS_KEY[classifyHttpStatus(http)] !== s) return null;
   if (!count(ts) || (mode !== "a" && mode !== "m")) return null;
   if (!(ms === null || (count(ms) && ms <= MAX_LATENCY_MS))) return null;
-  return [code, s, http, ts, mode, ms];
+  const entry: HistoryEntry = [code, s, http as number | null, ts, mode, ms as number | null];
+  if (avail !== undefined) {
+    // A key that does not match the HTTP evidence (e.g. "liberada" on a 429) is rejected.
+    if (
+      !AVAILABILITY_KEYS.includes(avail as AvailabilityKey) ||
+      !storedAvailabilityIsConsistent(http as number | null, avail as AvailabilityKey)
+    )
+      return null;
+    entry.push(avail as AvailabilityKey);
+  }
+  return entry;
 }
 
 /** Keeps every valid part of a saved log; returns null when the shape is unusable. */
@@ -248,6 +293,8 @@ export interface CodeTotals {
   byMode: { a: number; m: number };
   len2: number;
   len3: number;
+  /** Independent category counters (latest result per code; one category each). */
+  categories: AvailabilityCounts;
 }
 
 export function codeTotals(results: ResultsMap, meaningResults: ResultsMap): CodeTotals {
@@ -265,8 +312,10 @@ export function codeTotals(results: ResultsMap, meaningResults: ResultsMap): Cod
     byMode: { a: Object.keys(results).length, m: Object.keys(meaningResults).length },
     len2: 0,
     len3: 0,
+    categories: emptyAvailabilityCounts(),
   };
   for (const [code, r] of latest) {
+    t.categories[availabilityOf(r)]++;
     if (r[0] === "e") t.exists++;
     else if (r[0] === "n") t.notFound++;
     else t.errors++;
