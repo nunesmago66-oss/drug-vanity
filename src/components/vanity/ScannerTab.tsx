@@ -69,6 +69,7 @@ import { EMPTY_STATS, STATS_KEY } from "@/lib/vanity/stats";
 import {
   describeDiag,
   emptyDiag,
+  failureLabel,
   getDiag,
   noteLimit,
   noteResponse,
@@ -480,10 +481,10 @@ export function ScannerTab({
               retryAfterSeconds: null,
               reason: timedOut
                 ? "A função de verificação não respondeu a tempo. Não é um resultado."
-                : "A função de verificação não respondeu. Não é um resultado.",
+                : `Falha interna do app antes da consulta. Erro original: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}. Não é um resultado.`,
               checkedAt: new Date().toISOString(),
               discordQueried: null,
-              errorKind: timedOut ? "timeout" : "network",
+              errorKind: timedOut ? "timeout" : "app_error",
             };
           } finally {
             clearTimeout(timer);
@@ -573,13 +574,15 @@ export function ScannerTab({
           const origin =
             outcome.rateLimitSource === "discord"
               ? `O Discord retornou limite de taxa (HTTP 429).${scope}`
-              : outcome.rateLimitSource === "suspected_edge"
-                ? "A conexão com o Discord falhou logo depois de um limite de taxa — provável bloqueio da proteção Cloudflare (o navegador não consegue ler essa resposta). Para não prolongar o bloqueio, o app parou de enviar consultas."
-                : outcome.rateLimitSource === "cloudflare_edge"
-                  ? "A proteção da Cloudflare na frente do Discord bloqueou a consulta (HTTP 429). Esse bloqueio vale para a sua conexão de internet por alguns minutos."
-                  : outcome.rateLimitSource === "app_block"
-                    ? "Bloqueio preventivo do app: um limite de taxa do Discord recebido há pouco ainda está ativo, por isso nenhuma consulta foi enviada ao Discord."
-                    : "Limite de taxa (HTTP 429) — não foi possível confirmar se veio do Discord ou de um bloqueio preventivo do app.";
+              : outcome.rateLimitSource === "blocked_response"
+                ? `O discord.com respondeu, mas o navegador bloqueou a leitura da resposta (sem permissão CORS) — típico de uma página de bloqueio/desafio da Cloudflare para a sua conexão, ou de uma extensão/bloqueador. Para não prolongar o bloqueio, o app parou de enviar consultas.${limit?.trace?.errorName ? ` Erro original: ${limit.trace.errorName}: ${limit.trace.errorMessage ?? ""}.` : ""}`
+                : outcome.rateLimitSource === "suspected_edge"
+                  ? "A conexão com o Discord falhou logo depois de um limite de taxa — provável bloqueio da proteção Cloudflare (o navegador não consegue ler essa resposta). Para não prolongar o bloqueio, o app parou de enviar consultas."
+                  : outcome.rateLimitSource === "cloudflare_edge"
+                    ? "A proteção da Cloudflare na frente do Discord bloqueou a consulta (HTTP 429). Esse bloqueio vale para a sua conexão de internet por alguns minutos."
+                    : outcome.rateLimitSource === "app_block"
+                      ? "Bloqueio preventivo do app: um limite de taxa do Discord recebido há pouco ainda está ativo, por isso nenhuma consulta foi enviada ao Discord."
+                      : "Limite de taxa (HTTP 429) — não foi possível confirmar se veio do Discord ou de um bloqueio preventivo do app.";
           const asked =
             limit?.discordQueried === true && limit.retryAfterSeconds != null
               ? ` Espera pedida: ${secondsLabel(limit.retryAfterSeconds * 1000)}; com margem de segurança${count > 1 ? ` e recuo progressivo (${count} limites em 10 min)` : ""}: ${mmss(secs)}.`
@@ -601,12 +604,15 @@ export function ScannerTab({
             text: `Pausa automática após ${outcome.checked} verificações. Toque em “Retomar” para continuar.`,
           });
           break;
-        case "errors":
+        case "errors": {
+          const f = getDiag().lastFailure;
+          const cause = f ? ` Causa da última falha: ${failureLabel(f)}.` : "";
           setMessage({
             tone: "error",
-            text: `${MAX_CONSECUTIVE_ERRORS} erros seguidos, mesmo após ${MAX_TEMP_RETRIES} novas tentativas cada. Varredura pausada — verifique sua conexão e retome mais tarde. Use “Retestar erros temporários” para repetir esses códigos.`,
+            text: `${MAX_CONSECUTIVE_ERRORS} erros seguidos, mesmo após ${MAX_TEMP_RETRIES} novas tentativas cada. Varredura pausada para não repetir consultas que estão falhando.${cause} Nenhum progresso foi perdido: os códigos pendentes continuam na fila. Corrija a causa e toque em “Retomar”; use “Retestar erros temporários” para repetir esses códigos.`,
           });
           break;
+        }
         case "stopped":
           setMessage({
             tone: "info",

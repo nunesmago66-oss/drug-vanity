@@ -132,3 +132,4 @@
 - [x] Causa raiz: todo 429 (mesmo de 0,3 s) parava a varredura, exigia "Retomar" e reduzia o ritmo por horas; aviso antigo continuava na tela; bloqueio Cloudflare aparecia como erro de conexão e era repetido.
 - [x] Gerenciador central, espera automática, retomada automática, diagnóstico visual, quick check com trava entre abas; 180 testes.
 - [ ] iPhone real e 429 real no aparelho do usuário continuam não verificados.
+- [x] Connection-failure diagnosis: real error/trace, split counters, CORS-block detection, Safari <17.4 support

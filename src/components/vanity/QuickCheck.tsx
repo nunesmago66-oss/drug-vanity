@@ -148,12 +148,13 @@ export function QuickCheck({
         retryAfterSeconds: null,
         reason: timedOut
           ? "A verificação não respondeu a tempo. Não é um resultado."
-          : "A verificação falhou. Não é um resultado.",
+          : `Falha interna do app antes da consulta. Erro original: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}. Não é um resultado.`,
         checkedAt: new Date().toISOString(),
         discordQueried: null,
-        errorKind: timedOut ? "timeout" : "network",
+        errorKind: timedOut ? "timeout" : "app_error",
       };
       setResult(r);
+      if (!backgroundEnabled()) updateDiag((d) => noteResponse(d, r));
       if (!backgroundEnabled()) setResults((prev) => ({ ...prev, [r.code]: toCompact(r) }));
     } finally {
       clearTimeout(timer);
@@ -230,7 +231,9 @@ export function QuickCheck({
               Abrir link <ExternalLink className="size-3" aria-hidden />
             </a>
           </div>
-          <p className="text-sm text-muted-foreground">{describeResult(toCompact(result))}</p>
+          <p className="text-sm text-muted-foreground">
+            {result.reason || describeResult(toCompact(result))}
+          </p>
           <p className="text-xs text-muted-foreground">
             Verified Availability: {AVAILABILITY_LABEL[result.availability ?? "UNKNOWN"]}
           </p>

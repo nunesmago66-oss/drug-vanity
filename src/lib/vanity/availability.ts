@@ -133,7 +133,13 @@ export function classifyAvailability(e: AvailabilityEvidence): Availability {
   if (e.formatValid === false) return "INVALID";
   // App-side blocks and anything not answered by Discord prove nothing.
   if (e.discordQueried === false) return "UNKNOWN";
-  if (e.errorKind === "timeout" || e.errorKind === "network" || e.errorKind === "invalid_reply")
+  if (
+    e.errorKind === "timeout" ||
+    e.errorKind === "network" ||
+    e.errorKind === "cors_blocked" ||
+    e.errorKind === "app_error" ||
+    e.errorKind === "invalid_reply"
+  )
     return "UNKNOWN";
 
   const http = e.httpStatus;

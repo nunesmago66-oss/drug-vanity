@@ -13,11 +13,18 @@ export function RateLimitPanel({ view }: { view: DiagView }) {
     ["Origem do bloqueio", view.origin],
     ["Rota afetada", view.route],
     ["Tempo restante", view.remainingSeconds > 0 ? mmss(view.remainingSeconds) : "—"],
-    ["Requisições ao Discord", view.requests.toLocaleString("pt-BR")],
+    ["Consultas iniciadas", view.started.toLocaleString("pt-BR")],
+    ["Enviadas ao Discord", view.sent.toLocaleString("pt-BR")],
+    ["Respostas HTTP recebidas", view.httpResponses.toLocaleString("pt-BR")],
+    ["Falhas de DNS/conexão", view.connFailures.toLocaleString("pt-BR")],
+    ["Bloqueadas pelo navegador (CORS)", view.corsBlocked.toLocaleString("pt-BR")],
+    ["Tempo esgotado", view.timeouts.toLocaleString("pt-BR")],
+    ["Falhas internas do app", view.appFailures.toLocaleString("pt-BR")],
     ["Respostas 429", view.limited.toLocaleString("pt-BR")],
     ["Recuperação", view.recovery],
     ["Bloqueio externo", view.external],
   ];
+  const wide: [string, string][] = [["Última falha", view.lastFailure]];
   return (
     <details className="group rounded-md border bg-background/40" aria-label="Diagnóstico">
       <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 px-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
@@ -33,7 +40,11 @@ export function RateLimitPanel({ view }: { view: DiagView }) {
               : "bg-status-inconclusive-bg text-status-inconclusive",
           )}
         >
-          {view.normal ? "Funcionamento normal" : view.limit}
+          {view.normal
+            ? "Funcionamento normal"
+            : view.failing && view.state !== "cooldown" && view.state !== "offline"
+              ? "Sem resposta válida do Discord"
+              : view.limit}
         </span>
       </summary>
       <dl className="grid gap-x-3 gap-y-1 border-t p-3 text-xs sm:grid-cols-2">
@@ -41,6 +52,12 @@ export function RateLimitPanel({ view }: { view: DiagView }) {
           <div key={k} className="flex flex-col">
             <dt className="text-muted-foreground">{k}</dt>
             <dd className="font-medium text-foreground">{v}</dd>
+          </div>
+        ))}
+        {wide.map(([k, v]) => (
+          <div key={k} className="flex flex-col sm:col-span-2">
+            <dt className="text-muted-foreground">{k}</dt>
+            <dd className="break-all font-medium text-foreground">{v}</dd>
           </div>
         ))}
       </dl>

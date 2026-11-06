@@ -113,6 +113,33 @@ export interface RateLimitDiag {
   lastLimit: LimitEvent | null;
   /** Scanner mode that should resume by itself when the cooldown ends. */
   autoResume: "a" | "m" | null;
+  /** Attempts started by the check function (every call, even ones that fail early). */
+  started: number;
+  /** Attempts that actually left this device towards discord.com. */
+  sent: number;
+  /** HTTP status received and readable (any code, including 429). */
+  httpResponses: number;
+  /** No answer at all: DNS, TLS, refused connection, firewall, content blocker. */
+  connFailures: number;
+  /** discord.com answered but the browser could not read it (no CORS). */
+  corsBlocked: number;
+  timeouts: number;
+  /** The app's own function failed (not Discord, not the network). */
+  appFailures: number;
+  lastFailure: FailureEvent | null;
+}
+
+export interface FailureEvent {
+  at: number;
+  id: string;
+  url: string;
+  layer: string;
+  kind: string;
+  httpStatus: number | null;
+  name: string | null;
+  message: string | null;
+  durationMs: number;
+  code: string;
 }
 
 export const emptyDiag = (now = 0): RateLimitDiag => ({
@@ -124,6 +151,14 @@ export const emptyDiag = (now = 0): RateLimitDiag => ({
   lastOkAt: 0,
   lastLimit: null,
   autoResume: null,
+  started: 0,
+  sent: 0,
+  httpResponses: 0,
+  connFailures: 0,
+  corsBlocked: 0,
+  timeouts: 0,
+  appFailures: 0,
+  lastFailure: null,
 });
 
 const MAX_AHEAD_MS = 25 * 60 * 60_000;
@@ -137,6 +172,7 @@ const ORIGINS: readonly string[] = [
   "app_block",
   "unknown",
   "suspected_edge",
+  "blocked_response",
 ];
 
 export function validateDiag(raw: unknown, now = Date.now()): RateLimitDiag {
@@ -159,6 +195,23 @@ export function validateDiag(raw: unknown, now = Date.now()): RateLimitDiag {
         }
       : null;
   const ar = r["autoResume"];
+  const f = r["lastFailure"] as Record<string, unknown> | null | undefined;
+  const s = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : null);
+  const lastFailure: FailureEvent | null =
+    f && typeof f === "object" && typeof f["kind"] === "string"
+      ? {
+          at: time(f["at"], now),
+          id: s(f["id"], 40) ?? "",
+          url: s(f["url"], 200) ?? "",
+          layer: s(f["layer"], 20) ?? "",
+          kind: s(f["kind"], 30) ?? "",
+          httpStatus: typeof f["httpStatus"] === "number" ? f["httpStatus"] : null,
+          name: s(f["name"], 60),
+          message: s(f["message"], 300),
+          durationMs: count(f["durationMs"]),
+          code: s(f["code"], 8) ?? "",
+        }
+      : null;
   return {
     v: 1,
     since: time(r["since"], now),
@@ -168,15 +221,64 @@ export function validateDiag(raw: unknown, now = Date.now()): RateLimitDiag {
     lastOkAt: time(r["lastOkAt"], now),
     lastLimit,
     autoResume: ar === "a" || ar === "m" ? ar : null,
+    started: count(r["started"]),
+    sent: count(r["sent"]),
+    httpResponses: count(r["httpResponses"]),
+    connFailures: count(r["connFailures"]),
+    corsBlocked: count(r["corsBlocked"]),
+    timeouts: count(r["timeouts"]),
+    appFailures: count(r["appFailures"]),
+    lastFailure,
   };
 }
 
-/** Counts one answer from the check function (only real Discord contacts count as requests). */
+/**
+ * Counts one finished attempt of the check function, split by what really
+ * happened: started → sent → HTTP answer, or connection / CORS / timeout /
+ * app failure. `requests` = attempts that reached Discord (HTTP answer or an
+ * unreadable answer from its edge).
+ */
 export function noteResponse(d: RateLimitDiag, r: CheckResult, now = Date.now()): RateLimitDiag {
   const next = { ...d, since: d.since || now };
-  if (r.discordQueried === true) next.requests++;
+  next.started++;
+  const appSide =
+    r.discordQueried === false || r.errorKind === "app_error" || r.errorKind === "invalid_reply";
+  if (!appSide) next.sent++;
+  const answered = r.httpStatus != null && r.discordQueried !== false;
+  if (answered) next.httpResponses++;
+  if (answered || r.errorKind === "cors_blocked") next.requests++;
   if (r.httpStatus === 429 && r.discordQueried === true) next.limited++;
   if (r.httpStatus === 200 || r.httpStatus === 404) next.lastOkAt = now;
+  let kind: string | null = null;
+  if (r.errorKind === "cors_blocked") {
+    next.corsBlocked++;
+    kind = "cors_blocked";
+  } else if (r.errorKind === "timeout") {
+    next.timeouts++;
+    kind = "timeout";
+  } else if (r.errorKind === "network") {
+    next.connFailures++;
+    kind = "network";
+  } else if (r.errorKind === "app_error" || r.errorKind === "invalid_reply") {
+    next.appFailures++;
+    kind = r.errorKind;
+  } else if (r.status === "inconclusive" && r.httpStatus !== 429 && r.discordQueried !== false)
+    kind = r.errorKind ?? "unexpected";
+  if (kind) {
+    const t = r.trace;
+    next.lastFailure = {
+      at: now,
+      id: t?.id ?? "",
+      url: t?.url ?? "",
+      layer: t?.layer ?? "",
+      kind,
+      httpStatus: r.httpStatus,
+      name: t?.errorName ?? null,
+      message: t?.errorMessage ?? (r.reason ? r.reason.slice(0, 300) : null),
+      durationMs: t?.durationMs ?? 0,
+      code: r.code,
+    };
+  }
   return next;
 }
 
@@ -220,6 +322,8 @@ export type LimitStateKey = "normal" | "waiting" | "cooldown" | "recovered" | "o
 export interface DiagView {
   state: LimitStateKey;
   normal: boolean;
+  /** The latest real attempt failed (newer than the last valid answer). */
+  failing: boolean;
   connection: string;
   limit: string;
   origin: string;
@@ -228,6 +332,15 @@ export interface DiagView {
   requests: number;
   limited: number;
   recovery: string;
+  /** Wire-level counters and the last failure with its original error. */
+  started: number;
+  sent: number;
+  httpResponses: number;
+  connFailures: number;
+  corsBlocked: number;
+  timeouts: number;
+  appFailures: number;
+  lastFailure: string;
   /** Distinguishes Discord's own (external) wait from the app's internal margin. */
   external: string;
 }
@@ -237,6 +350,7 @@ export const ORIGIN_LABEL: Record<LimitOrigin, string> = {
   cloudflare_edge: "Cloudflare (proteção do Discord)",
   suspected_edge: "Provável Cloudflare (sem resposta legível)",
   app_block: "Bloqueio preventivo do app",
+  blocked_response: "Resposta do discord.com ilegível (provável bloqueio Cloudflare)",
   unknown: "Não identificada",
 };
 
@@ -308,14 +422,12 @@ export function describeDiag(
         : cooling
           ? "Duração do bloqueio externo desconhecida; o app aguarda por segurança"
           : "Sem bloqueio ativo conhecido";
+  const failing = !!d.lastFailure && d.lastFailure.at > d.lastOkAt;
   return {
     state,
-    normal: state === "normal" || state === "recovered",
-    connection: !ctx.online
-      ? "Sem internet"
-      : d.lastOkAt
-        ? `OK — última resposta válida às ${hhmmss(d.lastOkAt)}`
-        : "Online (nenhuma resposta ainda)",
+    normal: (state === "normal" || state === "recovered") && !failing,
+    failing,
+    connection: connectionLabel(d, ctx.online),
     limit,
     origin: l ? ORIGIN_LABEL[l.origin] : "—",
     route,
@@ -323,8 +435,55 @@ export function describeDiag(
     requests: d.requests,
     limited: d.limited,
     recovery,
+    started: d.started,
+    sent: d.sent,
+    httpResponses: d.httpResponses,
+    connFailures: d.connFailures,
+    corsBlocked: d.corsBlocked,
+    timeouts: d.timeouts,
+    appFailures: d.appFailures,
+    lastFailure: failureLabel(d.lastFailure),
     external,
   };
+}
+
+export const FAILURE_LABEL: Record<string, string> = {
+  network: "Sem resposta do discord.com (DNS/TLS/conexão ou bloqueio de rede)",
+  cors_blocked: "Resposta do discord.com bloqueada pelo navegador (sem CORS)",
+  timeout: "Tempo esgotado",
+  app_error: "Falha interna do app",
+  invalid_reply: "Resposta inválida da função de verificação",
+  server_error: "Erro do servidor do Discord (5xx)",
+  unexpected: "Resposta HTTP inesperada",
+};
+
+/**
+ * Never says "online" just because the page loaded: only a real HTTP answer
+ * from Discord proves the connection works; otherwise the last real failure wins.
+ */
+export function connectionLabel(d: RateLimitDiag, online: boolean): string {
+  if (!online) return "Sem internet neste aparelho";
+  const f = d.lastFailure;
+  if (f && f.at > d.lastOkAt)
+    return `Falhando — ${FAILURE_LABEL[f.kind] ?? f.kind} às ${hhmmss(f.at)}`;
+  if (d.lastOkAt) return `OK — Discord respondeu às ${hhmmss(d.lastOkAt)}`;
+  return "Ainda não testada (nenhuma consulta ao Discord)";
+}
+
+export function failureLabel(f: FailureEvent | null): string {
+  if (!f) return "Nenhuma";
+  const parts = [
+    `${hhmmss(f.at)} · “${f.code}” · ${FAILURE_LABEL[f.kind] ?? f.kind}`,
+    f.httpStatus != null ? `HTTP ${f.httpStatus}` : "sem status HTTP",
+    f.name || f.message ? `erro original: ${[f.name, f.message].filter(Boolean).join(": ")}` : "",
+    f.layer
+      ? `camada: ${f.layer === "browser" ? "navegador" : f.layer === "background" ? "processamento em segundo plano" : f.layer}`
+      : "",
+    f.durationMs ? `${f.durationMs} ms` : "",
+    f.id ? `id ${f.id}` : "",
+    f.url,
+  ];
+  return parts.filter(Boolean).join(" · ");
 }
 
 /* ---------------- browser store (shared by every component and tab) ---------------- */

@@ -84,6 +84,57 @@ export interface CheckResult {
   discordErrorCode?: number | null;
   /** `expires_at` of the invite when Discord returned one. */
   expiresAt?: string | null;
+  /** What really happened on the wire for this attempt (no tokens, no user data). */
+  trace?: RequestTrace | null;
+}
+
+/**
+ * Wire-level record of one attempt, so a failure is never just "no connection":
+ * correlation id, exact URL, calling layer, duration and the ORIGINAL error.
+ * `probe` is the browser's follow-up check after a failed fetch:
+ * "reachable_unreadable" = discord.com answered but the browser refused to let
+ * the page read it (CORS: Cloudflare challenge/block page, or an extension);
+ * "unreachable" = no answer at all (DNS, TLS, firewall, content blocker);
+ * "offline" = the device reports no network.
+ */
+export interface RequestTrace {
+  id: string;
+  url: string;
+  at: string;
+  layer: "browser" | "background" | "server";
+  durationMs: number;
+  errorName: string | null;
+  errorMessage: string | null;
+  probe: "reachable_unreadable" | "unreachable" | "offline" | null;
+}
+
+const TRACE_LAYERS: readonly string[] = ["browser", "background", "server"];
+const TRACE_PROBES: readonly string[] = ["reachable_unreadable", "unreachable", "offline"];
+const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : null);
+
+export function sanitizeTrace(raw: unknown): RequestTrace | null {
+  if (!raw || typeof raw !== "object") return null;
+  const t = raw as Record<string, unknown>;
+  const url = str(t["url"], 200);
+  const id = str(t["id"], 40);
+  if (!url || !id || !url.startsWith("https://discord.com/")) return null;
+  const d = t["durationMs"];
+  return {
+    id,
+    url,
+    at: str(t["at"], 40) ?? "",
+    layer:
+      typeof t["layer"] === "string" && TRACE_LAYERS.includes(t["layer"])
+        ? (t["layer"] as RequestTrace["layer"])
+        : "browser",
+    durationMs: typeof d === "number" && Number.isFinite(d) && d >= 0 ? Math.round(d) : 0,
+    errorName: str(t["errorName"], 60),
+    errorMessage: str(t["errorMessage"], 300),
+    probe:
+      typeof t["probe"] === "string" && TRACE_PROBES.includes(t["probe"])
+        ? (t["probe"] as RequestTrace["probe"])
+        : null,
+  };
 }
 
 export type LimitLayer = "discord_api" | "cloudflare_edge";
@@ -95,7 +146,11 @@ export type ErrorKind =
   | "network"
   | "app_block"
   | "app_throttle"
-  | "invalid_reply";
+  | "invalid_reply"
+  /** discord.com answered but the browser could not read it (CORS-less block page). */
+  | "cors_blocked"
+  /** The app's own check function threw before any request result existed. */
+  | "app_error";
 const LIMIT_LAYERS: readonly string[] = ["discord_api", "cloudflare_edge"];
 const ERROR_KINDS: readonly string[] = [
   "rate_limit",
@@ -106,11 +161,19 @@ const ERROR_KINDS: readonly string[] = [
   "app_block",
   "app_throttle",
   "invalid_reply",
+  "cors_blocked",
+  "app_error",
 ];
 
 /** Where a rate-limit stop came from, so a preventive block is never shown as a Discord 429. */
 export type RateLimitSource =
-  "discord" | "cloudflare_edge" | "app_block" | "unknown" | "suspected_edge";
+  | "discord"
+  | "cloudflare_edge"
+  | "app_block"
+  | "unknown"
+  | "suspected_edge"
+  /** discord.com answered with a response the browser may not read (no CORS). */
+  | "blocked_response";
 
 export function rateLimitSourceOf(
   r: Pick<CheckResult, "httpStatus" | "discordQueried"> & { limitLayer?: LimitLayer | null },
@@ -251,6 +314,7 @@ export function normalizeCheckResult(code: string, raw: unknown): CheckResult {
           ? "rate_limit"
           : kind
         : null,
+    trace: sanitizeTrace(r.trace),
   };
 }
 
@@ -427,6 +491,13 @@ export async function runVerificationQueue(opts: QueueOptions): Promise<QueueOut
         }
         opts.onRateLimit?.(result, i);
         return out("rate_limited", result.retryAfterSeconds, rateLimitSourceOf(result), result);
+      }
+      if (result.errorKind === "cors_blocked") {
+        // discord.com answered but the page may not read it (Cloudflare block page without
+        // CORS): an external block for this connection. Retrying fast would extend it.
+        setPace(paceAfterLimit(pace, "edge", now()));
+        opts.onRateLimit?.(result, i);
+        return out("rate_limited", null, "blocked_response", result);
       }
       if (isSuspectedEdgeBlock(result, pace, now())) {
         // Connection failure right after a 429: retrying would extend a Cloudflare block.
