@@ -1,4 +1,10 @@
-import { REQUEST_TIMEOUT_MS, classifyHttpStatus, type CheckResult } from "./check-rules";
+import {
+  REQUEST_TIMEOUT_MS,
+  classifyHttpStatus,
+  type CheckResult,
+  type RequestTrace,
+} from "./check-rules";
+import { describeError, inviteUrl, newRequestId } from "./invite-check.browser";
 
 import { classifyAvailability, readInviteBody } from "./availability";
 import { readLimitEvidence, readNextAllowed } from "./invite-response";
@@ -15,7 +21,31 @@ function result(code: string, partial: Omit<CheckResult, "code" | "checkedAt">):
   return { code, checkedAt: new Date().toISOString(), ...partial };
 }
 
-export async function checkInviteOnDiscord(code: string, clientKey: string): Promise<CheckResult> {
+/** HTML instead of JSON on a non-429: a Cloudflare challenge/block page, not a Discord answer. */
+export function isChallengePage(status: number, contentType: string | null, body: string): boolean {
+  if (status === 200 || status === 404) return false;
+  const html = /text\/html/i.test(contentType ?? "") || /^\s*<(!doctype|html)/i.test(body);
+  return html;
+}
+
+export async function checkInviteOnDiscord(
+  code: string,
+  clientKey: string,
+  requestId: string = newRequestId(),
+): Promise<CheckResult> {
+  const url = inviteUrl(code);
+  const started = Date.now();
+  const trace = (extra: Partial<RequestTrace> = {}): RequestTrace => ({
+    id: requestId,
+    url,
+    at: new Date(started).toISOString(),
+    layer: "server",
+    durationMs: Date.now() - started,
+    errorName: null,
+    errorMessage: null,
+    probe: null,
+    ...extra,
+  });
   const gate = limiter.acquire(clientKey);
   if (!gate.ok && gate.kind === "blocked") {
     const wait = gate.waitSeconds;
@@ -27,6 +57,7 @@ export async function checkInviteOnDiscord(code: string, clientKey: string): Pro
       reason: `Bloqueio preventivo do app: um limite de taxa do Discord recebido há pouco ainda está ativo. Nenhuma consulta foi enviada ao Discord. Aguarde ${wait}s.`,
       discordQueried: false,
       errorKind: "app_block",
+      trace: trace(),
     });
   }
   if (!gate.ok) {
@@ -41,20 +72,21 @@ export async function checkInviteOnDiscord(code: string, clientKey: string): Pro
           : "Consultas muito rápidas. Nenhuma consulta foi enviada ao Discord. Aguarde alguns segundos.",
       discordQueried: false,
       errorKind: "app_throttle",
+      trace: trace(),
     });
   }
 
   try {
-    const res = await fetch(
-      `https://discord.com/api/v10/invites/${encodeURIComponent(code)}?with_counts=false`,
-      {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "DiscordVanityFinder (public invite lookup, 1.0)",
-        },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "DiscordVanityFinder (public invite lookup, 1.0)",
       },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    console.info(
+      `[discord-check ${requestId}] server GET ${url} -> HTTP ${res.status} in ${Date.now() - started}ms`,
     );
 
     if (res.status === 429) {
@@ -96,6 +128,7 @@ export async function checkInviteOnDiscord(code: string, clientKey: string): Pro
         limitGlobal: ev.global,
         errorKind: "rate_limit",
         availability: "UNKNOWN",
+        trace: trace(),
       });
     }
 
@@ -107,6 +140,22 @@ export async function checkInviteOnDiscord(code: string, clientKey: string): Pro
       /* ignore */
     }
     const evidence = readInviteBody(code, res.status, bodyText);
+    if (isChallengePage(res.status, res.headers.get("content-type"), bodyText)) {
+      console.warn(`[discord-check ${requestId}] challenge/block page`, {
+        status: res.status,
+        cfRay: res.headers.get("cf-ray"),
+      });
+      return result(code, {
+        status: "inconclusive",
+        httpStatus: res.status,
+        retryAfterSeconds: null,
+        reason: `A proteção Cloudflare do Discord devolveu uma página de desafio/bloqueio (HTTP ${res.status}, HTML) para o servidor do site. Não é um resultado.`,
+        discordQueried: true,
+        errorKind: "edge_challenge",
+        availability: "UNKNOWN",
+        trace: trace(),
+      });
+    }
 
     const status = classifyHttpStatus(res.status);
     const nextAllowed = status === "inconclusive" ? null : readNextAllowed(res.headers);
@@ -137,21 +186,23 @@ export async function checkInviteOnDiscord(code: string, clientKey: string): Pro
         discordQueried: true,
         ...evidence,
       }),
+      trace: trace(),
     });
   } catch (err) {
-    console.error("invite check failed", code, err);
-    const timedOut =
-      err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+    const { name, message } = describeError(err);
+    console.error(`[discord-check ${requestId}] server GET ${url} failed: ${name}: ${message}`);
+    const timedOut = name === "TimeoutError" || name === "AbortError";
     return result(code, {
       status: "inconclusive",
       httpStatus: null,
       retryAfterSeconds: null,
       reason: timedOut
-        ? "Tempo esgotado ao consultar o Discord. Não é um resultado."
-        : "Falha de conexão ao consultar o Discord. Não é um resultado.",
-      discordQueried: true,
+        ? "Tempo esgotado: o servidor do site não recebeu resposta do Discord. Não é um resultado."
+        : `O servidor do site não conseguiu se conectar ao Discord. Erro original: ${name}: ${message}. Não é um resultado.`,
+      discordQueried: null,
       errorKind: timedOut ? "timeout" : "network",
       availability: "UNKNOWN",
+      trace: trace({ errorName: name, errorMessage: message }),
     });
   } finally {
     limiter.release(clientKey);

@@ -41,7 +41,7 @@ import {
   savePace,
   type PaceState,
 } from "@/lib/vanity/pacing";
-import { checkInviteFromBrowser } from "@/lib/vanity/invite-check.browser";
+import { checkInviteViaBackend } from "@/lib/vanity/invite-backend";
 import {
   CHARSET_LABEL,
   compactErrorClass,
@@ -136,7 +136,7 @@ export function ScannerTab({
   onCheck,
   background,
 }: Props) {
-  const checkFn = checkInviteFromBrowser;
+  const checkFn = checkInviteViaBackend;
   const [current, setCurrent] = useState<string | null>(null);
   const [nextAt, setNextAt] = useState(0);
   const [recent, setRecent] = useState<CheckResult[]>([]);

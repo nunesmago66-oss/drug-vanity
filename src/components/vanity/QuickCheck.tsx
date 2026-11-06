@@ -15,7 +15,7 @@ import {
   normalizeCode,
   type CheckResult,
 } from "@/lib/vanity/check-rules";
-import { checkInviteFromBrowser } from "@/lib/vanity/invite-check.browser";
+import { checkInviteViaBackend } from "@/lib/vanity/invite-backend";
 import { availabilityOf, describeResult, toCompact, type ResultsMap } from "@/lib/vanity/scanner";
 import { inviteUrl } from "@/lib/vanity/browser";
 import { loadPace, paceAfterLimit, recentLimitCount, savePace } from "@/lib/vanity/pacing";
@@ -53,7 +53,7 @@ export function QuickCheck({
   busy,
   onCheck,
 }: Props) {
-  const checkFn = backgroundEnabled() ? backgroundCheck : checkInviteFromBrowser;
+  const checkFn = backgroundEnabled() ? backgroundCheck : checkInviteViaBackend;
   const [input, setInput] = useState("");
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<CheckResult | null>(null);

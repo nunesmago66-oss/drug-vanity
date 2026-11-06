@@ -137,6 +137,7 @@ export function classifyAvailability(e: AvailabilityEvidence): Availability {
     e.errorKind === "timeout" ||
     e.errorKind === "network" ||
     e.errorKind === "cors_blocked" ||
+    e.errorKind === "edge_challenge" ||
     e.errorKind === "app_error" ||
     e.errorKind === "invalid_reply"
   )

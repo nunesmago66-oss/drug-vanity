@@ -69,10 +69,13 @@ export function inlineLimitWaitMs(
  * it is treated as a rate limit (code stays pending) instead of a quick retry.
  */
 export function isSuspectedEdgeBlock(
-  r: Pick<CheckResult, "errorKind" | "httpStatus">,
+  r: Pick<CheckResult, "errorKind" | "httpStatus" | "trace">,
   pace: Pick<PaceState, "limits">,
   now = Date.now(),
 ): boolean {
+  // Only a failure on the way to discord.com itself: losing the site's own
+  // backend says nothing about Discord and must never become a rate limit.
+  if (r.trace && !r.trace.url.startsWith("https://discord.com/")) return false;
   return (
     r.httpStatus === null &&
     r.errorKind === "network" &&
@@ -454,6 +457,7 @@ export const FAILURE_LABEL: Record<string, string> = {
   app_error: "Falha interna do app",
   invalid_reply: "Resposta inválida da função de verificação",
   server_error: "Erro do servidor do Discord (5xx)",
+  edge_challenge: "Página de desafio/bloqueio da Cloudflare (HTML)",
   unexpected: "Resposta HTTP inesperada",
 };
 

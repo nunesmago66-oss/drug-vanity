@@ -117,7 +117,8 @@ export function sanitizeTrace(raw: unknown): RequestTrace | null {
   const t = raw as Record<string, unknown>;
   const url = str(t["url"], 200);
   const id = str(t["id"], 40);
-  if (!url || !id || !url.startsWith("https://discord.com/")) return null;
+  if (!url || !id || !(url.startsWith("https://discord.com/") || url.startsWith("/api/public/")))
+    return null;
   const d = t["durationMs"];
   return {
     id,
@@ -149,6 +150,8 @@ export type ErrorKind =
   | "invalid_reply"
   /** discord.com answered but the browser could not read it (CORS-less block page). */
   | "cors_blocked"
+  /** HTML challenge/block page from Discord's Cloudflare on a non-429 status. */
+  | "edge_challenge"
   /** The app's own check function threw before any request result existed. */
   | "app_error";
 const LIMIT_LAYERS: readonly string[] = ["discord_api", "cloudflare_edge"];
@@ -162,6 +165,7 @@ const ERROR_KINDS: readonly string[] = [
   "app_throttle",
   "invalid_reply",
   "cors_blocked",
+  "edge_challenge",
   "app_error",
 ];
 
@@ -495,7 +499,7 @@ export async function runVerificationQueue(opts: QueueOptions): Promise<QueueOut
       if (result.errorKind === "cors_blocked") {
         // discord.com answered but the page may not read it (Cloudflare block page without
         // CORS): an external block for this connection. Retrying fast would extend it.
-        setPace(paceAfterLimit(pace, "edge", now()));
+        // Not a confirmed 429: no progressive backoff, no slower pace afterwards.
         opts.onRateLimit?.(result, i);
         return out("rate_limited", null, "blocked_response", result);
       }
