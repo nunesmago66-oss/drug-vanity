@@ -4,7 +4,7 @@ import { initialPace, validatePace, PACE_FLOOR_MS, PACE_MAX_MS } from "./pacing"
 describe("adaptive pace persistence", () => {
   it("clamps the saved interval to the supported range", () => {
     expect(validatePace({ v: 1, intervalMs: 1, streak: 0 }, 1_000)?.intervalMs).toBe(PACE_FLOOR_MS);
-    expect(validatePace({ v: 1, intervalMs: 999_999, streak: 0 }, 1_000)?.intervalMs).toBe(
+    expect(validatePace({ v: 1, intervalMs: 999_999, streak: 0, limits: [900] }, 1_000)?.intervalMs).toBe(
       PACE_MAX_MS,
     );
   });

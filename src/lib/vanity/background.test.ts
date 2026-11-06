@@ -102,7 +102,7 @@ describe("real Node background execution", () => {
       await rm(dir, { recursive: true });
     }
   });
-  it("stops on 429 with a durable cooldown, leaves code pending and never auto-resumes", async () => {
+  it("stops on 429 with a durable cooldown, leaves code pending; a user pause cancels auto-resume", async () => {
     const dir = await mkdtemp(join(tmpdir(), "background-429-"));
     let calls = 0;
     const engine = new BackgroundEngine(join(dir, "state.json"), async (code) => {
@@ -116,11 +116,12 @@ describe("real Node background execution", () => {
       expect(calls).toBe(1);
       expect(engine.state.results).toEqual({});
       expect(engine.state.cooldownUntil - engine.state.lastCheckAt).toBeGreaterThanOrEqual(4000);
-      expect(engine.state.pace.intervalMs).toBe(4000);
+      expect(engine.state.pace.intervalMs).toBe(3000);
       const restored = new BackgroundEngine(join(dir, "state.json"));
       await restored.load();
       restored.resume();
-      expect(restored.state.status).toBe("rate_limited");
+      // Paused by the user (engine.stop): a restart keeps it paused.
+      expect(restored.state.status).toBe("stopped");
       await expect(restored.start({ ...emptyBackground(), codes: ["aa"] })).rejects.toThrow(
         "limite de taxa",
       );
