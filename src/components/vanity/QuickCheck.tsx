@@ -103,7 +103,11 @@ export function QuickCheck({
     if (!backgroundEnabled()) {
       // Under the lock, reread timing shared by every tab and mode: a cooldown set by
       // another tab is never skipped, and the shared pace (not just the floor) is kept.
-      const sharedCooldown = readSavedTiming(window.localStorage, "dvf:cooldown-until", cooldownUntil);
+      const sharedCooldown = readSavedTiming(
+        window.localStorage,
+        "dvf:cooldown-until",
+        cooldownUntil,
+      );
       lastCheckRef.current = Math.max(
         lastCheckRef.current,
         readSavedTiming(window.localStorage, "dvf:last-check-at", lastCheckAt),
@@ -154,7 +158,10 @@ export function QuickCheck({
         const retryCtl = new AbortController();
         const retryTimer = setTimeout(() => retryCtl.abort(), CLIENT_TIMEOUT_MS);
         try {
-          r = normalizeCheckResult(code, await checkFn({ data: { code }, signal: retryCtl.signal }));
+          r = normalizeCheckResult(
+            code,
+            await checkFn({ data: { code }, signal: retryCtl.signal }),
+          );
         } finally {
           clearTimeout(retryTimer);
         }

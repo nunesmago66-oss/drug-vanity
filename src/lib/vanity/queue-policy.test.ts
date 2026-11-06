@@ -61,10 +61,18 @@ describe("conservative default pace", () => {
   });
 
   it("shared wait honors the last request of any tab and a pending cooldown", () => {
-    expect(sharedWaitMs({ now: 10_000, lastCheckAt: 9_000, cooldownUntil: 0, paceIntervalMs: 3000 })).toBe(2000);
-    expect(sharedWaitMs({ now: 10_000, lastCheckAt: 9_900, cooldownUntil: 0, paceIntervalMs: 100 })).toBe(1400);
-    expect(sharedWaitMs({ now: 10_000, lastCheckAt: 0, cooldownUntil: 70_000, paceIntervalMs: 3000 })).toBe(60_000);
-    expect(sharedWaitMs({ now: 10_000, lastCheckAt: 0, cooldownUntil: 0, paceIntervalMs: 3000 })).toBe(0);
+    expect(
+      sharedWaitMs({ now: 10_000, lastCheckAt: 9_000, cooldownUntil: 0, paceIntervalMs: 3000 }),
+    ).toBe(2000);
+    expect(
+      sharedWaitMs({ now: 10_000, lastCheckAt: 9_900, cooldownUntil: 0, paceIntervalMs: 100 }),
+    ).toBe(1400);
+    expect(
+      sharedWaitMs({ now: 10_000, lastCheckAt: 0, cooldownUntil: 70_000, paceIntervalMs: 3000 }),
+    ).toBe(60_000);
+    expect(
+      sharedWaitMs({ now: 10_000, lastCheckAt: 0, cooldownUntil: 0, paceIntervalMs: 3000 }),
+    ).toBe(0);
   });
 });
 
@@ -122,7 +130,7 @@ describe("verification queue", () => {
   });
 
   it("a 429 of uncertain origin (no layer) also stops instead of retrying", async () => {
-    const h = harness({ ab: [limited("ab", { limitLayer: undefined, retryAfterSeconds: 2 })] });
+    const h = harness({ ab: [limited("ab", { limitLayer: null, retryAfterSeconds: 2 })] });
     const out = await runVerificationQueue({
       codes: ["ab", "cd"],
       batchLimit: Infinity,
@@ -159,8 +167,18 @@ describe("Retry-After handling", () => {
     }
   });
   it("global limits are never waited inline", () => {
-    expect(inlineLimitWaitMs(limited("ab", { limitGlobal: true, retryAfterSeconds: 1 }), 0)).toBeNull();
-    expect(inlineLimitWaitMs(limited("ab", { limitLayer: "cloudflare_edge", retryAfterSeconds: 1 } as Partial<CheckResult>), 0)).toBeNull();
+    expect(
+      inlineLimitWaitMs(limited("ab", { limitGlobal: true, retryAfterSeconds: 1 }), 0),
+    ).toBeNull();
+    expect(
+      inlineLimitWaitMs(
+        limited("ab", {
+          limitLayer: "cloudflare_edge",
+          retryAfterSeconds: 1,
+        } as Partial<CheckResult>),
+        0,
+      ),
+    ).toBeNull();
   });
 });
 
@@ -169,7 +187,7 @@ describe("classification never invents an answer", () => {
     const cases: Partial<CheckResult>[] = [
       { httpStatus: 429, errorKind: "rate_limit" },
       { httpStatus: null, errorKind: "network", discordQueried: null },
-      { httpStatus: 403, errorKind: "cloudflare" } as Partial<CheckResult>,
+      { httpStatus: 403, errorKind: "edge_challenge" },
       { httpStatus: null, errorKind: "timeout", discordQueried: null },
     ];
     for (const c of cases) {

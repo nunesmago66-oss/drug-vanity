@@ -36,7 +36,10 @@ export function sharedWaitMs(input: {
   cooldownUntil: number;
   paceIntervalMs: number;
 }): number {
-  const pace = Math.max(MIN_INTERVAL_MS, Number.isFinite(input.paceIntervalMs) ? input.paceIntervalMs : MIN_INTERVAL_MS);
+  const pace = Math.max(
+    MIN_INTERVAL_MS,
+    Number.isFinite(input.paceIntervalMs) ? input.paceIntervalMs : MIN_INTERVAL_MS,
+  );
   const last = Number.isFinite(input.lastCheckAt) ? input.lastCheckAt : 0;
   const cool = Number.isFinite(input.cooldownUntil) ? input.cooldownUntil : 0;
   return Math.max(0, last + pace - input.now, cool - input.now);
