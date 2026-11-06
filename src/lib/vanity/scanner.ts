@@ -2,7 +2,9 @@ import {
   AVAILABILITY_TO_KEY,
   KEY_TO_AVAILABILITY,
   availabilityFromHttp,
+  emptyAvailabilityCounts,
   type Availability,
+  type AvailabilityCounts,
   type AvailabilityKey,
 } from "./availability";
 import { STATUS_LABEL, type CheckResult, type CheckStatus } from "./check-rules";
@@ -109,10 +111,20 @@ export function toCompact(r: CheckResult): CompactResult {
   return base;
 }
 
-/** VERIFIED AVAILABILITY of a saved result (legacy entries derive it from the HTTP status). */
+/**
+ * VERIFIED AVAILABILITY (category) of a saved result — exactly one per result.
+ * Legacy entries derive it from the HTTP status; a stored key always wins.
+ */
 export function availabilityOf(c: CompactResult): Availability {
   const key = c[4];
   return key && KEY_TO_AVAILABILITY[key] ? KEY_TO_AVAILABILITY[key] : availabilityFromHttp(c[1]);
+}
+
+/** Independent per-category counters; every result is counted in exactly one category. */
+export function countAvailability(results: ResultsMap): AvailabilityCounts {
+  const counts = emptyAvailabilityCounts();
+  for (const r of Object.values(results)) counts[availabilityOf(r)]++;
+  return counts;
 }
 
 export const statusOf = (c: CompactResult): CheckStatus => FROM_KEY[c[0]];

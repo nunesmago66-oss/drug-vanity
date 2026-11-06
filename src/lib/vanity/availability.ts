@@ -6,18 +6,27 @@
  * GET /invites/{code} answers 404 (error 10006 "Unknown Invite") for codes that
  * never existed, expired, were revoked, or are reserved/held by a server — the
  * cases are indistinguishable. Therefore:
- *   - 404 is never CONFIRMED_FREE (it is UNKNOWN);
+ *   - 404 is never CONFIRMED_FREE: it is NOT_IN_USE ("não está em uso" — no
+ *     invite answers for the code), a different category from "liberada";
  *   - errors, timeouts, 429 and unexpected answers are UNKNOWN (or BLOCKED for 403);
  *   - CONFIRMED_FREE is only produced from an explicit official confirmation
  *     object; the scanner never fabricates one.
  */
 
 export type Availability =
-  "CONFIRMED_FREE" | "ACTIVE" | "INVALID" | "EXPIRED" | "REVOKED" | "BLOCKED" | "UNKNOWN";
+  | "CONFIRMED_FREE"
+  | "ACTIVE"
+  | "NOT_IN_USE"
+  | "INVALID"
+  | "EXPIRED"
+  | "REVOKED"
+  | "BLOCKED"
+  | "UNKNOWN";
 
 export const AVAILABILITY_STATES: readonly Availability[] = [
   "CONFIRMED_FREE",
   "ACTIVE",
+  "NOT_IN_USE",
   "INVALID",
   "EXPIRED",
   "REVOKED",
@@ -26,14 +35,51 @@ export const AVAILABILITY_STATES: readonly Availability[] = [
 ];
 
 export const AVAILABILITY_LABEL: Record<Availability, string> = {
-  CONFIRMED_FREE: "Livre (confirmado oficialmente)",
-  ACTIVE: "Ativo",
-  INVALID: "Inválido",
-  EXPIRED: "Expirado",
-  REVOKED: "Revogado",
-  BLOCKED: "Bloqueado",
-  UNKNOWN: "Desconhecido",
+  CONFIRMED_FREE: "Liberada (confirmação oficial)",
+  ACTIVE: "Ativa",
+  NOT_IN_USE: "Não está em uso",
+  INVALID: "Inválida",
+  EXPIRED: "Expirada",
+  REVOKED: "Revogada",
+  BLOCKED: "Bloqueada",
+  UNKNOWN: "Indefinida",
 };
+
+/** Plural names used by filters and counters (one category per result). */
+export const AVAILABILITY_PLURAL: Record<Availability, string> = {
+  CONFIRMED_FREE: "Liberadas",
+  ACTIVE: "Ativas",
+  NOT_IN_USE: "Não estão em uso",
+  INVALID: "Inválidas",
+  EXPIRED: "Expiradas",
+  REVOKED: "Revogadas",
+  BLOCKED: "Bloqueadas",
+  UNKNOWN: "Indefinidas",
+};
+
+/** Display order of the categories in filters and counters. */
+export const CATEGORY_ORDER: readonly Availability[] = [
+  "ACTIVE",
+  "NOT_IN_USE",
+  "CONFIRMED_FREE",
+  "EXPIRED",
+  "REVOKED",
+  "BLOCKED",
+  "UNKNOWN",
+  "INVALID",
+];
+
+export type AvailabilityCounts = Record<Availability, number>;
+export const emptyAvailabilityCounts = (): AvailabilityCounts => ({
+  CONFIRMED_FREE: 0,
+  ACTIVE: 0,
+  NOT_IN_USE: 0,
+  INVALID: 0,
+  EXPIRED: 0,
+  REVOKED: 0,
+  BLOCKED: 0,
+  UNKNOWN: 0,
+});
 
 /** Discord JSON error codes we read from the response body. */
 export const DISCORD_UNKNOWN_INVITE = 10006;
@@ -101,10 +147,11 @@ export function classifyAvailability(e: AvailabilityEvidence): Availability {
   }
   if (http === 400) return "INVALID";
   if (http === 403) return "BLOCKED";
-  // 404 / 10006: unknown, expired, revoked and reserved look identical → UNKNOWN.
+  // 404 / 10006: no invite answers for the code → NOT_IN_USE. Never-existed,
+  // expired, revoked and reserved look identical, so it is NOT "liberada".
   // Only an explicit official confirmation can upgrade it to CONFIRMED_FREE.
   if (http === 404) {
-    return isOfficialConfirmation(e.code, e.officialConfirmation) ? "CONFIRMED_FREE" : "UNKNOWN";
+    return isOfficialConfirmation(e.code, e.officialConfirmation) ? "CONFIRMED_FREE" : "NOT_IN_USE";
   }
   // 429, 5xx, null, any other code → never a result.
   return "UNKNOWN";
@@ -141,17 +188,27 @@ export function readInviteBody(
 
 /* ---------- compact keys (5th element of a saved result) ---------- */
 
-export type AvailabilityKey = "F" | "A" | "I" | "E" | "R" | "B" | "U";
+export type AvailabilityKey = "F" | "A" | "N" | "I" | "E" | "R" | "B" | "U";
 export const AVAILABILITY_TO_KEY: Record<Availability, AvailabilityKey> = {
   CONFIRMED_FREE: "F",
   ACTIVE: "A",
+  NOT_IN_USE: "N",
   INVALID: "I",
   EXPIRED: "E",
   REVOKED: "R",
   BLOCKED: "B",
   UNKNOWN: "U",
 };
-export const AVAILABILITY_KEYS: readonly AvailabilityKey[] = ["F", "A", "I", "E", "R", "B", "U"];
+export const AVAILABILITY_KEYS: readonly AvailabilityKey[] = [
+  "F",
+  "A",
+  "N",
+  "I",
+  "E",
+  "R",
+  "B",
+  "U",
+];
 export const KEY_TO_AVAILABILITY = Object.fromEntries(
   Object.entries(AVAILABILITY_TO_KEY).map(([k, v]) => [v, k]),
 ) as Record<AvailabilityKey, Availability>;
@@ -159,6 +216,7 @@ export const KEY_TO_AVAILABILITY = Object.fromEntries(
 /** What a saved result implies when no explicit availability key was stored (legacy data). */
 export function availabilityFromHttp(httpStatus: number | null): Availability {
   if (httpStatus === 200) return "ACTIVE";
+  if (httpStatus === 404) return "NOT_IN_USE";
   if (httpStatus === 400) return "INVALID";
   if (httpStatus === 403) return "BLOCKED";
   return "UNKNOWN";
