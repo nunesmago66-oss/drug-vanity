@@ -1,0 +1,1 @@
+- Standalone Node lookup backend for a dedicated-IP server; reuses src/lib/vanity check code unchanged and returns the same CheckResult. The site uses it only when VITE_INVITE_API_BASE_URL is set (one backend per request). Its global queue is process memory, so run exactly one instance; multiple instances would need shared coordination.
