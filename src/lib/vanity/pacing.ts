@@ -15,7 +15,7 @@ export const PACE_START_MS = 2000;
 /** Slowest automatic pace. */
 export const PACE_MAX_MS = 30_000;
 /** Clean answers in a row before the pacer speeds up one step. */
-export const SPEED_UP_AFTER = 10;
+export const SPEED_UP_AFTER = 5;
 export const SPEED_UP_FACTOR = 0.85;
 
 export type LimitKind = "global" | "route" | "edge" | "app" | "unknown";
