@@ -1,5 +1,19 @@
-import { AVAILABILITY_LABEL } from "@/lib/vanity/availability";
-import { ClipboardList, Copy, Download, ExternalLink, History, Search, Trash2 } from "lucide-react";
+import {
+  AVAILABILITY_LABEL,
+  AVAILABILITY_PLURAL,
+  CATEGORY_ORDER,
+  type Availability,
+} from "@/lib/vanity/availability";
+import {
+  BadgeCheck,
+  ClipboardList,
+  Copy,
+  Download,
+  ExternalLink,
+  History,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -18,7 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { copyText, downloadCsv, inviteLabel, inviteUrl } from "@/lib/vanity/browser";
 import type { CatalogEntry } from "@/lib/vanity/catalog";
-import { STATUS_LABEL, toCsv } from "@/lib/vanity/check-rules";
+import { toCsv } from "@/lib/vanity/check-rules";
 import { matchesSearch } from "@/lib/vanity/search";
 import {
   BUILT_IN_ABBREVIATIONS,
@@ -28,11 +42,11 @@ import {
 } from "@/lib/vanity/abbreviation-library";
 import {
   availabilityOf,
+  countAvailability,
   describeResult,
   statusLabelOf,
   statusOf,
   type ResultsMap,
-  type StatusKey,
 } from "@/lib/vanity/scanner";
 
 import { EmptyState, NOT_FOUND_WARNING, NativeSelect, StatusBadge } from "./shared";
@@ -45,12 +59,33 @@ interface Props {
   abbreviationRecords?: AbbreviationRecord[];
 }
 
-const FILTERS: Array<{ value: "all" | StatusKey; label: string }> = [
+type Filter = "all" | Availability;
+/** One filter per category; "Inválidas" only appears when such results exist. */
+const FILTERS: Array<{ value: Filter; label: string }> = [
   { value: "all", label: "Todos" },
-  { value: "e", label: STATUS_LABEL.exists },
-  { value: "n", label: "Não encontrado" },
-  { value: "x", label: STATUS_LABEL.inconclusive },
+  ...CATEGORY_ORDER.map((a) => ({ value: a, label: AVAILABILITY_PLURAL[a] })),
 ];
+const CSV_NAME: Record<Filter, string> = {
+  all: "vanity-resultados.csv",
+  ACTIVE: "vanity-ativas.csv",
+  NOT_IN_USE: "vanity-nao-estao-em-uso.csv",
+  CONFIRMED_FREE: "vanity-liberadas.csv",
+  EXPIRED: "vanity-expiradas.csv",
+  REVOKED: "vanity-revogadas.csv",
+  BLOCKED: "vanity-bloqueadas.csv",
+  UNKNOWN: "vanity-indefinidas.csv",
+  INVALID: "vanity-invalidas.csv",
+};
+const STAT_TONE: Record<Availability, string> = {
+  ACTIVE: "bg-status-exists",
+  NOT_IN_USE: "bg-status-notfound",
+  CONFIRMED_FREE: "bg-primary",
+  EXPIRED: "bg-status-inconclusive",
+  REVOKED: "bg-status-inconclusive",
+  BLOCKED: "bg-destructive",
+  UNKNOWN: "bg-status-inconclusive",
+  INVALID: "bg-status-inconclusive",
+};
 
 const PAGE = 100;
 type Sort = "recent" | "oldest" | "az" | "za" | "length";
@@ -71,7 +106,7 @@ export function ResultsTab({
   running,
   abbreviationRecords = BUILT_IN_ABBREVIATIONS,
 }: Props) {
-  const [filter, setFilter] = useState<"all" | StatusKey>("all");
+  const [filter, setFilter] = useState<Filter>("all");
   const [length, setLength] = useState<"all" | "2" | "3">("all");
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -87,11 +122,7 @@ export function ResultsTab({
   );
 
   const all = useMemo(() => Object.entries(deferredResults), [deferredResults]);
-  const counts = useMemo(() => {
-    const c = { e: 0, n: 0, x: 0 };
-    for (const [, r] of all) c[r[0]]++;
-    return c;
-  }, [all]);
+  const counts = useMemo(() => countAvailability(deferredResults), [deferredResults]);
 
   const matchingAbbreviationCodes = useMemo(
     () => findMatchingAbbreviationCodes(deferredQuery, abbreviationRecords),
@@ -99,7 +130,7 @@ export function ResultsTab({
   );
   const list = useMemo(() => {
     const filtered = all.filter(([code, r]) => {
-      if (filter !== "all" && r[0] !== filter) return false;
+      if (filter !== "all" && availabilityOf(r) !== filter) return false;
       if (length !== "all" && code.length !== Number(length)) return false;
       if (onlyFavorites && !favorites.has(code)) return false;
       if (
@@ -129,7 +160,8 @@ export function ResultsTab({
     matchingAbbreviationCodes,
   ]);
 
-  const filtersActive = filter !== "all" || length !== "all" || !!query || onlyFavorites;
+  const filtersActiveExceptCategory = length !== "all" || !!query || onlyFavorites;
+  const filtersActive = filter !== "all" || filtersActiveExceptCategory;
 
   function clearFilters() {
     setFilter("all");
@@ -142,7 +174,7 @@ export function ResultsTab({
 
   function exportCsv() {
     downloadCsv(
-      "vanity-resultados.csv",
+      CSV_NAME[filter],
       toCsv(
         [
           "codigo",
@@ -154,6 +186,7 @@ export function ResultsTab({
           "significado",
           "aviso",
           "verified_availability",
+          "categoria",
         ],
         list.map(([code, r]) => [
           code,
@@ -165,6 +198,7 @@ export function ResultsTab({
           meanings.get(code) ?? "",
           r[0] === "n" ? NOT_FOUND_WARNING : r[0] === "x" ? describeResult(r) : "",
           availabilityOf(r),
+          AVAILABILITY_LABEL[availabilityOf(r)],
         ]),
       ),
     );
@@ -187,7 +221,8 @@ export function ResultsTab({
     <div className="space-y-4">
       <p className="text-sm" data-testid="results-summary">
         <strong className="font-mono">{all.length.toLocaleString("pt-BR")}</strong> códigos testados
-        · {counts.e} existentes · {counts.n} não encontrados · {counts.x} erros
+        · {counts.ACTIVE} ativas · {counts.NOT_IN_USE} não estão em uso · {counts.CONFIRMED_FREE}{" "}
+        liberadas · {counts.UNKNOWN} indefinidas
       </p>
 
       <section
@@ -201,24 +236,12 @@ export function ResultsTab({
             percent: all.length ? 100 : 0,
             tone: "bg-primary",
           },
-          {
-            label: "Convites ativos",
-            value: counts.e,
-            percent: all.length ? (counts.e / all.length) * 100 : 0,
-            tone: "bg-emerald-500",
-          },
-          {
-            label: "Não encontrados",
-            value: counts.n,
-            percent: all.length ? (counts.n / all.length) * 100 : 0,
-            tone: "bg-sky-500",
-          },
-          {
-            label: "Erros",
-            value: counts.x,
-            percent: all.length ? (counts.x / all.length) * 100 : 0,
-            tone: "bg-amber-500",
-          },
+          ...CATEGORY_ORDER.filter((a) => a !== "INVALID" || counts.INVALID > 0).map((a) => ({
+            label: AVAILABILITY_PLURAL[a],
+            value: counts[a],
+            percent: all.length ? (counts[a] / all.length) * 100 : 0,
+            tone: STAT_TONE[a],
+          })),
         ].map((stat) => (
           <div key={stat.label} className="min-w-0 rounded-lg border bg-card p-3">
             <p className="truncate text-xs text-muted-foreground">{stat.label}</p>
@@ -240,7 +263,7 @@ export function ResultsTab({
 
       <section className="space-y-3 rounded-lg border bg-card p-3 sm:p-4" aria-label="Filtros">
         <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar por status">
-          {FILTERS.map((f) => (
+          {FILTERS.filter((f) => f.value !== "INVALID" || counts.INVALID > 0).map((f) => (
             <Button
               key={f.value}
               type="button"
@@ -376,6 +399,12 @@ export function ResultsTab({
         <EmptyState icon={History} title="Nenhum código testado ainda">
           Inicie uma varredura na aba Scanner. Os resultados ficam salvos só neste aparelho.
         </EmptyState>
+      ) : list.length === 0 && filter === "CONFIRMED_FREE" && !filtersActiveExceptCategory ? (
+        <EmptyState icon={BadgeCheck} title="Nenhuma URL liberada">
+          Só entra aqui um código com confirmação positiva de uma operação oficial e autorizada do
+          Discord. A API pública não oferece essa confirmação, então HTTP 404 fica em “Não estão em
+          uso” e erros ou limites ficam em “Indefinidas” — nunca aqui.
+        </EmptyState>
       ) : list.length === 0 ? (
         <EmptyState icon={Search} title="Nenhum resultado com esses filtros" />
       ) : (
@@ -391,7 +420,10 @@ export function ResultsTab({
                 {meanings.get(code) && <p className="mt-1 text-sm">{meanings.get(code)}</p>}
                 <p className="mt-1 text-xs text-muted-foreground">{describeResult(r)}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Verified Availability: {AVAILABILITY_LABEL[availabilityOf(r)]}
+                  Verified Availability:{" "}
+                  <span className="font-medium text-foreground">
+                    {AVAILABILITY_LABEL[availabilityOf(r)]}
+                  </span>
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2 border-t pt-2">
                   {r[0] === "n" && (
