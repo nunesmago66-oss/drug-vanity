@@ -66,6 +66,16 @@ import { cn } from "@/lib/utils";
 import { backgroundEnabled, backgroundRequest } from "@/lib/vanity/background-browser";
 import { emptyBackground, type BackgroundSnapshot } from "@/lib/vanity/background-protocol";
 import { EMPTY_STATS, STATS_KEY } from "@/lib/vanity/stats";
+import {
+  describeDiag,
+  getDiag,
+  noteLimit,
+  noteResponse,
+  subscribeDiag,
+  updateDiag,
+  validateDiag,
+} from "@/lib/vanity/rate-limit-manager";
+import { RateLimitPanel } from "./RateLimitPanel";
 
 import { EmptyState, NativeSelect, StatusBadge } from "./shared";
 
@@ -132,6 +142,16 @@ export function ScannerTab({
   const [now, setNow] = useState(() => Date.now());
   const [pace, setPace] = useState<PaceState>(initialPace);
   const [queueNote, setQueueNote] = useState<string | null>(null);
+  const [inlineUntil, setInlineUntil] = useState(0);
+  const [diagLocal, setDiagLocal] = useState(getDiag);
+  useEffect(() => subscribeDiag(() => setDiagLocal(getDiag())), []);
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const on = () => setVisible(document.visibilityState === "visible");
+    on();
+    document.addEventListener("visibilitychange", on);
+    return () => document.removeEventListener("visibilitychange", on);
+  }, []);
   // Session measurements for the real pace (reset at each run start / kept for the session).
   const startsRef = useRef<number[]>([]);
   const latenciesRef = useRef<number[]>([]);
@@ -219,6 +239,17 @@ export function ScannerTab({
         : selected),
     [candidateCodes, config.source, config.len2, config.len3, config.charset, selected],
   );
+
+  const myMode = meaningMode ? "m" : "a";
+  const startRef = useRef<() => void>(() => {});
+  // Automatic recovery: once the saved wait ends, resume the run that a 429 stopped
+  // (also after a reload during the block). "Pausar" cancels it.
+  useEffect(() => {
+    if (localBackground || running || blocked || cooling || !visible) return;
+    if (diagLocal.autoResume !== myMode) return;
+    const t = setTimeout(() => startRef.current(), 400);
+    return () => clearTimeout(t);
+  }, [localBackground, running, blocked, cooling, visible, diagLocal.autoResume, myMode]);
 
   const candidateSet = useMemo(() => new Set(candidates), [candidates]);
   const stats = useMemo(() => {
@@ -378,6 +409,9 @@ export function ScannerTab({
         savePace(window.localStorage, p);
       };
       updatePace({ ...livePace, note: null });
+      updateDiag((d) =>
+        d.autoResume === myMode ? { ...d, autoResume: null, recoveries: d.recoveries + 1 } : d,
+      );
       stopRef.current = false;
       pauseReasonRef.current = null;
       startsRef.current = [];
@@ -402,6 +436,7 @@ export function ScannerTab({
         shouldStop: () => stopRef.current || hasStorageFailure() || !lockRef.current?.held(),
         onStart: (code) => {
           setCurrent(code);
+          setInlineUntil(0);
           reqStartRef.current = Date.now();
           startsRef.current = [...startsRef.current, reqStartRef.current].slice(-60);
           lastCheckRef.current = reqStartRef.current;
@@ -439,7 +474,21 @@ export function ScannerTab({
             clearTimeout(timer);
           }
         },
+        onLimitWait: (r, waitMs, attempt) => {
+          const until = Date.now() + waitMs;
+          setInlineUntil(until);
+          onCheck?.(r, reqStartRef.current);
+          setRecent((list) => [r, ...list].slice(0, 6));
+          updateDiag((d) => ({
+            ...noteLimit(noteResponse(d, r), r, { inline: true, appUntil: until }),
+            recoveries: d.recoveries + 1,
+          }));
+          setQueueNote(
+            `O Discord pediu ${secondsLabel((r.retryAfterSeconds ?? 0) * 1000)} de espera (HTTP 429, rota de convites). “${r.code}” será repetido automaticamente em ${secondsLabel(waitMs)} — tentativa ${attempt}; nada foi perdido.`,
+          );
+        },
         onResult: (r) => {
+          updateDiag((d) => noteResponse(d, r));
           latenciesRef.current = [...latenciesRef.current, Date.now() - reqStartRef.current].slice(
             -60,
           );
@@ -450,11 +499,13 @@ export function ScannerTab({
           setRecent((list) => [r, ...list].slice(0, 6));
         },
         onRateLimit: (r) => {
+          updateDiag((d) => noteResponse(d, r));
           // Not a result: nothing is saved for this code, so "Retomar" checks it again.
           if (r.discordQueried === true) onCheck?.(r, reqStartRef.current);
           setRecent((list) => [r, ...list].slice(0, 6));
         },
         onRetry: (r, kind, attempt, waitMs) => {
+          updateDiag((d) => noteResponse(d, r));
           if (kind === "temporary") {
             if (r.discordQueried !== false) onCheck?.(r, reqStartRef.current);
             setQueueNote(
@@ -473,6 +524,7 @@ export function ScannerTab({
       setCurrent(null);
       setNextAt(0);
       setQueueNote(null);
+      setInlineUntil(0);
       // Flush coalesced saves now, so another tab or a reload sees every result.
       retryStorageSaves();
 
@@ -487,6 +539,16 @@ export function ScannerTab({
           sessionRef.current.limitWaitMs += secs * 1000;
           // Never shorten a longer wait that is already active.
           setCooldownUntil((prev) => Math.max(prev, until));
+          if (limit)
+            updateDiag((d) => ({
+              ...noteLimit(d, limit, {
+                inline: false,
+                appUntil: until,
+                origin: outcome.rateLimitSource === "suspected_edge" ? "suspected_edge" : undefined,
+              }),
+              // Resume by itself when the wait ends (cancelled by "Pausar").
+              autoResume: pauseReasonRef.current === "user" ? null : myMode,
+            }));
           setNow(Date.now());
           const scope = limit?.limitScope
             ? ` Escopo informado: ${limit.limitScope}${limit.limitScope === "global" ? " (limite global da sua conexão)" : " (limite da rota de convites)"}.`
@@ -496,6 +558,8 @@ export function ScannerTab({
           const origin =
             outcome.rateLimitSource === "discord"
               ? `O Discord retornou limite de taxa (HTTP 429).${scope}`
+              : outcome.rateLimitSource === "suspected_edge"
+                ? "A conexão com o Discord falhou logo depois de um limite de taxa — provável bloqueio da proteção Cloudflare (o navegador não consegue ler essa resposta). Para não prolongar o bloqueio, o app parou de enviar consultas."
               : outcome.rateLimitSource === "cloudflare_edge"
                 ? "A proteção da Cloudflare na frente do Discord bloqueou a consulta (HTTP 429). Esse bloqueio vale para a sua conexão de internet por alguns minutos."
                 : outcome.rateLimitSource === "app_block"
@@ -505,7 +569,7 @@ export function ScannerTab({
             limit?.discordQueried === true && limit.retryAfterSeconds != null
               ? ` Espera pedida: ${secondsLabel(limit.retryAfterSeconds * 1000)}; com margem de segurança${count > 1 ? ` e recuo progressivo (${count} limites em 10 min)` : ""}: ${mmss(secs)}.`
               : ` Espera: ${mmss(secs)}.`;
-          const text = `${origin}${asked} “${limit?.code ?? ""}” continua pendente e será o primeiro na retomada; nenhum resultado foi perdido. Retomada liberada às ${clock(until)}, com ritmo reduzido para 1 consulta a cada ${secondsLabel(effectiveInterval(outcome.pace, interval))}. Nada recomeça sozinho e o app não tenta contornar esse limite.`;
+          const text = `${origin}${asked} “${limit?.code ?? ""}” continua pendente e será o primeiro na retomada; nenhum resultado foi perdido. A varredura recomeça sozinha às ${clock(until)} (se você não pausar), com ritmo de 1 consulta a cada ${secondsLabel(effectiveInterval(outcome.pace, interval))}. O app não tenta contornar esse limite.`;
           updatePace({ ...outcome.pace, note: { at: Date.now(), text } });
           setMessage({ tone: "error", text });
           break;
@@ -557,6 +621,8 @@ export function ScannerTab({
     }
   }
 
+  startRef.current = () => void start();
+
   function retestErrors() {
     setResults((prev) => {
       const next = { ...prev };
@@ -602,6 +668,16 @@ export function ScannerTab({
         : stats.tested > 0 || stats.limited > 0
           ? "pausada"
           : "parada";
+  const diag = localBackground
+    ? validateDiag(background?.snapshot?.diag ?? diagLocal)
+    : diagLocal;
+  const diagView = describeDiag(diag, {
+    cooldownUntil,
+    now,
+    running,
+    online: typeof navigator === "undefined" ? true : navigator.onLine,
+    inlineUntil: localBackground ? (running ? cooldownUntil : 0) : inlineUntil,
+  });
   const noLength = !meaningMode && config.source === "generated" && !config.len2 && !config.len3;
   const startLabel = cooling
     ? `Aguarde ${mmss(cooldownSecs)} (limite de taxa)`
@@ -866,6 +942,7 @@ export function ScannerTab({
                 }
                 pauseReasonRef.current = "user";
                 stopRef.current = true;
+                updateDiag((d) => ({ ...d, autoResume: null }));
               }}
             >
               <Pause aria-hidden /> Pausar
@@ -904,7 +981,10 @@ export function ScannerTab({
               {mmss(cooldownSecs)} — retomada liberada às {clock(cooldownUntil)}.
             </p>
             <p className="text-xs text-muted-foreground">
-              O progresso está salvo. Depois do prazo, toque em “Retomar” — nada recomeça sozinho.
+              O progresso está salvo.{" "}
+              {diag.autoResume === myMode
+                ? "A varredura recomeça sozinha quando o prazo terminar."
+                : "Depois do prazo, toque em “Retomar”."}
             </p>
             {!message && pace.note && (
               <p className="text-xs text-muted-foreground">
@@ -939,6 +1019,8 @@ export function ScannerTab({
             {message.text}
           </p>
         )}
+
+        <RateLimitPanel view={diagView} />
       </section>
 
       {recent.length > 0 && (
