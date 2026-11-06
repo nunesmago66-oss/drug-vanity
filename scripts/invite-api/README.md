@@ -5,6 +5,7 @@ Serviço Node.js que faz **somente** as consultas ao Discord, usando o mesmo có
 `server-limiter.ts`). Resposta idêntica a `/api/public/invites/{code}` (CheckResult).
 
 ## Garantias
+
 - Fila global única no processo: uma consulta ao Discord por vez, com espaçamento mínimo.
 - Bloqueio global após HTTP 429 (Retry-After + margem) vale para todos os visitantes do processo.
 - Uma consulta na fila por visitante; fila limitada (`MAX_QUEUE`) — excesso é recusado sem consultar o Discord.
@@ -12,6 +13,7 @@ Serviço Node.js que faz **somente** as consultas ao Discord, usando o mesmo có
 - **Rode UMA instância.** Várias instâncias teriam filas independentes (sem coordenação). Não escale horizontalmente.
 
 ## Implantação (sem custos automáticos — você escolhe e contrata a VPS)
+
 1. VPS Linux com **IPv4 público fixo e dedicado** (não use NAT compartilhado, proxy ou rotação de IP).
    O IP de saída da VPS é o que o Discord verá: confira com `curl -4 https://ifconfig.me`.
 2. Instale Docker. Na raiz do projeto:
@@ -34,5 +36,6 @@ Serviço Node.js que faz **somente** as consultas ao Discord, usando o mesmo có
    Sem essa variável o site continua usando o endpoint próprio (`/api/public/invites/...`), como hoje.
 
 ## Operacional somente depois
+
 A correção só é considerada operacional após a implantação e uma consulta real controlada.
 Se o Discord também limitar o IP da VPS, o motivo aparece nos `limitHeaders` de cada 429.

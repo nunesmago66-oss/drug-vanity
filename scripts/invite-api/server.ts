@@ -68,11 +68,19 @@ export function createQueue(cfg: ApiConfig, check: Check = checkInviteOnDiscord)
     run(code: string, clientKey: string, requestId?: string): Promise<CheckResult> {
       if (pendingClients.has(clientKey))
         return Promise.resolve(
-          busy(code, "Já existe uma consulta sua na fila do servidor. Nenhuma consulta foi enviada ao Discord.", 1),
+          busy(
+            code,
+            "Já existe uma consulta sua na fila do servidor. Nenhuma consulta foi enviada ao Discord.",
+            1,
+          ),
         );
       if (size >= cfg.maxQueue)
         return Promise.resolve(
-          busy(code, "Fila do servidor cheia. Nenhuma consulta foi enviada ao Discord. Aguarde alguns segundos.", 3),
+          busy(
+            code,
+            "Fila do servidor cheia. Nenhuma consulta foi enviada ao Discord. Aguarde alguns segundos.",
+            3,
+          ),
         );
       size++;
       pendingClients.add(clientKey);
@@ -102,7 +110,12 @@ function clientKeyOf(req: IncomingMessage, cfg: ApiConfig): string {
 
 export function createApi(cfg: ApiConfig, check?: Check) {
   const queue = createQueue(cfg, check);
-  const send = (res: ServerResponse, status: number, body: unknown, cors: Record<string, string>) => {
+  const send = (
+    res: ServerResponse,
+    status: number,
+    body: unknown,
+    cors: Record<string, string>,
+  ) => {
     res.writeHead(status, {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
@@ -165,10 +178,14 @@ if (isMain) {
   const port = Number(process.env["PORT"] ?? 8787);
   const host = process.env["HOST"] ?? "0.0.0.0";
   if (cfg.allowedOrigins.length === 0)
-    console.warn("ALLOWED_ORIGINS vazio: navegadores de outros sites serão recusados, inclusive o seu.");
+    console.warn(
+      "ALLOWED_ORIGINS vazio: navegadores de outros sites serão recusados, inclusive o seu.",
+    );
   const server = createApi(cfg);
   server.listen(port, host, () =>
-    console.info(`invite api on http://${host}:${port} (queue ${cfg.maxQueue}, gap ${cfg.gapMs}ms)`),
+    console.info(
+      `invite api on http://${host}:${port} (queue ${cfg.maxQueue}, gap ${cfg.gapMs}ms)`,
+    ),
   );
   const stop = () => server.close(() => process.exit(0));
   process.on("SIGINT", stop);
