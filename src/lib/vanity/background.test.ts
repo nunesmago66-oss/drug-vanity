@@ -116,7 +116,7 @@ describe("real Node background execution", () => {
       expect(calls).toBe(1);
       expect(engine.state.results).toEqual({});
       expect(engine.state.cooldownUntil - engine.state.lastCheckAt).toBeGreaterThanOrEqual(4000);
-      expect(engine.state.pace.intervalMs).toBe(3000);
+      expect(engine.state.pace.intervalMs).toBe(4500);
       const restored = new BackgroundEngine(join(dir, "state.json"));
       await restored.load();
       restored.resume();

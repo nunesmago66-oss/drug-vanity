@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   CLIENT_TIMEOUT_MS,
-  MIN_INTERVAL_MS,
+  sharedWaitMs,
   cooldownForResult,
   errorClassOf,
   isValidCode,
@@ -18,7 +18,14 @@ import {
 import { checkInviteViaBackend } from "@/lib/vanity/invite-backend";
 import { availabilityOf, describeResult, toCompact, type ResultsMap } from "@/lib/vanity/scanner";
 import { inviteUrl } from "@/lib/vanity/browser";
-import { loadPace, paceAfterLimit, recentLimitCount, savePace } from "@/lib/vanity/pacing";
+import {
+  effectiveInterval,
+  loadPace,
+  paceAfterLimit,
+  recentLimitCount,
+  savePace,
+} from "@/lib/vanity/pacing";
+import { readSavedTiming } from "@/lib/vanity/persistence";
 
 import { StatusBadge } from "./shared";
 import { acquireScanLock, type ScanLock } from "@/lib/vanity/scan-lock";
@@ -93,10 +100,36 @@ export function QuickCheck({
         return;
       }
     }
+    if (!backgroundEnabled()) {
+      // Under the lock, reread timing shared by every tab and mode: a cooldown set by
+      // another tab is never skipped, and the shared pace (not just the floor) is kept.
+      const sharedCooldown = readSavedTiming(
+        window.localStorage,
+        "dvf:cooldown-until",
+        cooldownUntil,
+      );
+      lastCheckRef.current = Math.max(
+        lastCheckRef.current,
+        readSavedTiming(window.localStorage, "dvf:last-check-at", lastCheckAt),
+      );
+      if (sharedCooldown > Date.now()) {
+        lock?.release();
+        setCooldownUntil((prev) => Math.max(prev, sharedCooldown));
+        setNow(Date.now());
+        setError(
+          `Pausa de limite em andamento (outra aba ou modo). Nenhuma consulta foi enviada. Aguarde ${Math.ceil((sharedCooldown - Date.now()) / 1000)} s.`,
+        );
+        return;
+      }
+    }
     setChecking(true);
     const startedAt = Date.now();
-    // Respect the shared minimum interval between requests.
-    const wait = lastCheckRef.current + MIN_INTERVAL_MS - Date.now();
+    const wait = sharedWaitMs({
+      now: Date.now(),
+      lastCheckAt: lastCheckRef.current,
+      cooldownUntil: 0,
+      paceIntervalMs: effectiveInterval(loadPace(window.localStorage), 0),
+    });
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     const controller = new AbortController();
     let timedOut = false;
@@ -122,7 +155,16 @@ export function QuickCheck({
         await new Promise((res) => setTimeout(res, inline));
         lastCheckRef.current = Date.now();
         setLastCheckAt(lastCheckRef.current);
-        r = normalizeCheckResult(code, await checkFn({ data: { code } }));
+        const retryCtl = new AbortController();
+        const retryTimer = setTimeout(() => retryCtl.abort(), CLIENT_TIMEOUT_MS);
+        try {
+          r = normalizeCheckResult(
+            code,
+            await checkFn({ data: { code }, signal: retryCtl.signal }),
+          );
+        } finally {
+          clearTimeout(retryTimer);
+        }
       }
       if (!backgroundEnabled()) updateDiag((d) => noteResponse(d, r));
       setResult(r);

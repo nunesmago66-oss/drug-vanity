@@ -9,9 +9,9 @@
  */
 
 /** Fastest pace the app ever uses (one request at a time). */
-export const PACE_FLOOR_MS = 1000;
+export const PACE_FLOOR_MS = 1500;
 /** Pace used when nothing is known yet. */
-export const PACE_START_MS = 2000;
+export const PACE_START_MS = 3000;
 /** Slowest automatic pace. */
 export const PACE_MAX_MS = 30_000;
 /** Clean answers in a row before the pacer speeds up one step. */

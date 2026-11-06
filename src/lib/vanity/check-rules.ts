@@ -24,6 +24,27 @@ export { DEFAULT_429_WAIT_SECONDS, MAX_SERVER_WAIT_SECONDS };
 
 /** Hard floor between two consecutive requests (adaptive pace never goes faster). */
 export const MIN_INTERVAL_MS = PACE_FLOOR_MS;
+/**
+ * Milliseconds the next request must still wait under the shared browser
+ * policy: never before a persisted cooldown ends, and never sooner than the
+ * current pace after the last request sent by any mode or tab. Read the
+ * timing values fresh while holding the cross-tab verification lock.
+ */
+export function sharedWaitMs(input: {
+  now: number;
+  lastCheckAt: number;
+  cooldownUntil: number;
+  paceIntervalMs: number;
+}): number {
+  const pace = Math.max(
+    MIN_INTERVAL_MS,
+    Number.isFinite(input.paceIntervalMs) ? input.paceIntervalMs : MIN_INTERVAL_MS,
+  );
+  const last = Number.isFinite(input.lastCheckAt) ? input.lastCheckAt : 0;
+  const cool = Number.isFinite(input.cooldownUntil) ? input.cooldownUntil : 0;
+  return Math.max(0, last + pace - input.now, cool - input.now);
+}
+
 /** 0 = automatic pace that adapts to Discord's real answers; others are fixed (slower) choices. */
 export const AUTO_INTERVAL = 0;
 export const INTERVAL_OPTIONS_MS = [AUTO_INTERVAL, 2000, 5000, 10000, 20000, 30000] as const;
