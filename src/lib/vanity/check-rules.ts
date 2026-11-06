@@ -93,6 +93,57 @@ export interface CheckResult {
   officialConfirmation?: OfficialConfirmation | null;
   /** What really happened on the wire for this attempt (no tokens, no user data). */
   trace?: RequestTrace | null;
+  /** Raw headers of a 429/block answer, so its real origin can be proven later. */
+  limitHeaders?: LimitHeaders | null;
+}
+
+/**
+ * Raw evidence of a 429 / block answer as received by the site's server
+ * (strings exactly as sent, truncated; no cookies, no IPs). `isolateSent1s` /
+ * `isolateSent10s` = requests THIS server instance sent to Discord in the last
+ * 1 s / 10 s: a "global" 429 while it sent ~1 request/s cannot come from this
+ * app's own traffic (Discord's global limit is far higher), so it proves the
+ * limit was consumed by other traffic on the same outbound address.
+ */
+export interface LimitHeaders {
+  status: number;
+  contentType: string | null;
+  retryAfter: string | null;
+  bodyRetryAfter: number | null;
+  bodyGlobal: boolean | null;
+  scope: string | null;
+  global: string | null;
+  bucket: string | null;
+  server: string | null;
+  cfRay: string | null;
+  cfMitigated: string | null;
+  html: boolean;
+  isolateSent1s: number | null;
+  isolateSent10s: number | null;
+}
+
+export function sanitizeLimitHeaders(raw: unknown): LimitHeaders | null {
+  if (!raw || typeof raw !== "object") return null;
+  const h = raw as Record<string, unknown>;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+  const status = n(h["status"]);
+  if (status == null) return null;
+  return {
+    status: Math.round(status),
+    contentType: str(h["contentType"], 80),
+    retryAfter: str(h["retryAfter"], 40),
+    bodyRetryAfter: n(h["bodyRetryAfter"]),
+    bodyGlobal: typeof h["bodyGlobal"] === "boolean" ? h["bodyGlobal"] : null,
+    scope: str(h["scope"], 20),
+    global: str(h["global"], 10),
+    bucket: str(h["bucket"], 80),
+    server: str(h["server"], 40),
+    cfRay: str(h["cfRay"], 60),
+    cfMitigated: str(h["cfMitigated"], 40),
+    html: h["html"] === true,
+    isolateSent1s: n(h["isolateSent1s"]),
+    isolateSent10s: n(h["isolateSent10s"]),
+  };
 }
 
 /**
@@ -335,6 +386,7 @@ export function normalizeCheckResult(code: string, raw: unknown): CheckResult {
           : kind
         : null,
     trace: sanitizeTrace(r.trace),
+    limitHeaders: status === "inconclusive" ? sanitizeLimitHeaders(r.limitHeaders) : null,
   };
 }
 
