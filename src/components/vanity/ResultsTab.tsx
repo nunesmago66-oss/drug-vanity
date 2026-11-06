@@ -196,7 +196,13 @@ export function ResultsTab({
           r[1] ?? "",
           new Date(r[2] * 1000).toISOString(),
           meanings.get(code) ?? "",
-          r[0] === "n" ? NOT_FOUND_WARNING : r[0] === "x" ? describeResult(r) : "",
+          availabilityOf(r) === "CONFIRMED_FREE"
+            ? ""
+            : r[0] === "n"
+              ? NOT_FOUND_WARNING
+              : r[0] === "x"
+                ? describeResult(r)
+                : "",
           availabilityOf(r),
           AVAILABILITY_LABEL[availabilityOf(r)],
         ]),
