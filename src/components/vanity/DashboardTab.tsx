@@ -38,8 +38,15 @@ import { matchesSearch } from "@/lib/vanity/search";
 import type { CheckStatus } from "@/lib/vanity/check-rules";
 import type { ResultsMap, StatusKey } from "@/lib/vanity/scanner";
 import {
+  AVAILABILITY_LABEL,
+  AVAILABILITY_PLURAL,
+  CATEGORY_ORDER,
+  type Availability,
+} from "@/lib/vanity/availability";
+import {
   avgResponseMs,
   codeTotals,
+  historyAvailability,
   lastDays,
   successRate,
   sumDays,
@@ -92,7 +99,7 @@ export function DashboardTab({
   useEffect(() => {
     if (active) setChartsReady(true);
   }, [active]);
-  const [historyFilter, setHistoryFilter] = useState<"all" | StatusKey>("all");
+  const [historyFilter, setHistoryFilter] = useState<"all" | Availability>("all");
   const [historyMode, setHistoryMode] = useState<"all" | "a" | "m">("all");
   const [historyQuery, setHistoryQuery] = useState("");
   const deferredHistoryQuery = useDeferredValue(historyQuery);
@@ -107,13 +114,33 @@ export function DashboardTab({
     () =>
       stats.recent.filter(
         (e) =>
-          (historyFilter === "all" || e[1] === historyFilter) &&
+          (historyFilter === "all" || historyAvailability(e) === historyFilter) &&
           (historyMode === "all" || e[4] === historyMode) &&
           matchesSearch(deferredHistoryQuery, e[0]),
       ),
     [stats.recent, historyFilter, historyMode, deferredHistoryQuery],
   );
 
+  const CATEGORY_HINT: Record<Availability, string> = {
+    ACTIVE: "Já existe convite ativo (indisponível)",
+    NOT_IN_USE: "HTTP 404 — não confirma vanity URL",
+    CONFIRMED_FREE: "Só com confirmação oficial do Discord",
+    EXPIRED: "Convite com validade vencida",
+    REVOKED: "Revogação identificada",
+    BLOCKED: "Acesso recusado (HTTP 403)",
+    UNKNOWN: "Erro/limite — retestar",
+    INVALID: "Código recusado pelo Discord",
+  };
+  const CATEGORY_BAR: Record<Availability, string> = {
+    ACTIVE: "bg-status-exists",
+    NOT_IN_USE: "bg-status-notfound",
+    CONFIRMED_FREE: "bg-primary",
+    EXPIRED: "bg-status-inconclusive",
+    REVOKED: "bg-status-inconclusive",
+    BLOCKED: "bg-destructive",
+    UNKNOWN: "bg-status-inconclusive",
+    INVALID: "bg-status-inconclusive",
+  };
   const codeCards = [
     {
       label: "Códigos verificados",
@@ -122,27 +149,15 @@ export function DashboardTab({
       bar: "bg-primary",
       share: totals.verified ? 100 : 0,
     },
-    {
-      label: "Sem convite ativo",
-      value: totals.notFound,
-      hint: "Candidatos — não confirma vanity URL",
-      bar: "bg-status-notfound",
-      share: totals.verified ? (totals.notFound / totals.verified) * 100 : 0,
-    },
-    {
-      label: "Em uso",
-      value: totals.exists,
-      hint: "Já existe convite ativo (indisponível)",
-      bar: "bg-status-exists",
-      share: totals.verified ? (totals.exists / totals.verified) * 100 : 0,
-    },
-    {
-      label: "Inválidos (erro/limite)",
-      value: totals.errors,
-      hint: "Sem resposta válida — retestar",
-      bar: "bg-status-inconclusive",
-      share: totals.verified ? (totals.errors / totals.verified) * 100 : 0,
-    },
+    ...CATEGORY_ORDER.filter((a) => a !== "INVALID" || totals.categories.INVALID > 0).map(
+      (a) => ({
+        label: AVAILABILITY_PLURAL[a],
+        value: totals.categories[a],
+        hint: CATEGORY_HINT[a],
+        bar: CATEGORY_BAR[a],
+        share: totals.verified ? (totals.categories[a] / totals.verified) * 100 : 0,
+      }),
+    ),
   ];
 
   const checkCards = [
@@ -335,14 +350,16 @@ export function DashboardTab({
                 aria-label="Filtrar histórico por status"
                 value={historyFilter}
                 onChange={(e) => {
-                  setHistoryFilter(e.target.value as "all" | StatusKey);
+                  setHistoryFilter(e.target.value as "all" | Availability);
                   setLimit(PAGE);
                 }}
               >
-                <option value="all">Todos os status</option>
-                <option value="n">Sem convite ativo</option>
-                <option value="e">Em uso</option>
-                <option value="x">Erro/limite</option>
+                <option value="all">Todas as categorias</option>
+                {CATEGORY_ORDER.map((a) => (
+                  <option key={a} value={a}>
+                    {AVAILABILITY_PLURAL[a]}
+                  </option>
+                ))}
               </NativeSelect>
               <NativeSelect
                 aria-label="Filtrar histórico por modo"
@@ -363,7 +380,9 @@ export function DashboardTab({
               </p>
             ) : (
               <ul className="divide-y" data-testid="history-list">
-                {history.slice(0, limit).map(([code, s, http, ts, mode, rt]) => (
+                {history.slice(0, limit).map((entry) => {
+                  const [code, s, http, ts, mode, rt] = entry;
+                  return (
                   <li
                     key={`${code}-${ts}-${mode}`}
                     className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2"
@@ -375,6 +394,9 @@ export function DashboardTab({
                       {code}
                     </span>
                     <StatusBadge status={STATUS[s]} className="text-[11px]" />
+                    <span className="text-[11px] font-medium">
+                      {AVAILABILITY_LABEL[historyAvailability(entry)]}
+                    </span>
                     <span className="ml-auto text-right text-[11px] text-muted-foreground tabular-nums">
                       {when(ts)}
                       <br />
