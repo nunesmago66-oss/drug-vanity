@@ -120,7 +120,12 @@ export async function checkInviteOnDiscord(
       const blocked = limiter.recordLimit(ev.retryAfterSeconds);
       const origin = explainLimitOrigin(raw, ev.layer);
       // Diagnostic only: no user data, no IPs, no credentials.
-      console.warn("discord 429", { code, layer: ev.layer ?? "unknown", blockedFor: blocked, ...raw });
+      console.warn("discord 429", {
+        code,
+        layer: ev.layer ?? "unknown",
+        blockedFor: blocked,
+        ...raw,
+      });
       const who =
         ev.layer === "cloudflare_edge"
           ? "A proteção da Cloudflare na frente do Discord bloqueou a consulta (HTTP 429)."

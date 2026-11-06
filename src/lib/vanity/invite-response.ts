@@ -114,7 +114,8 @@ export function explainLimitOrigin(h: LimitHeaders, layer: LimitLayer | null): s
     h.bodyGlobal === true || h.global?.toLowerCase() === "true" || h.scope === "global";
   if (isGlobal && h.isolateSent1s != null && h.isolateSent1s <= 2)
     return `Origem: limite GLOBAL do Discord para o endereço de saída do servidor do site. Este servidor enviou só ${h.isolateSent1s} consulta(s) no último segundo, então o limite foi consumido por outro tráfego que compartilha o mesmo endereço da hospedagem.`;
-  if (isGlobal) return "Origem: limite GLOBAL do Discord para o endereço de saída do servidor do site.";
+  if (isGlobal)
+    return "Origem: limite GLOBAL do Discord para o endereço de saída do servidor do site.";
   if (h.scope === "user" || h.scope === "shared")
     return `Origem: limite da rota de convites do Discord (escopo ${h.scope}).`;
   return "Origem: não identificada pela resposta (sem cabeçalhos de limite do Discord).";

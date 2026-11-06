@@ -54,7 +54,7 @@ describe("429 origin evidence recorded by the site's server", () => {
     });
     expect(r.reason).toContain("outro tráfego que compartilha o mesmo endereço");
     // Survives normalization (what the scanner stores in diagnostics).
-    expect(normalizeCheckResult(r, "ab").limitHeaders?.cfRay).toBe("abc123-GRU");
+    expect(normalizeCheckResult("ab", r).limitHeaders?.cfRay).toBe("abc123-GRU");
   });
 
   it("per-route 429 (scope user) is reported as the invite route limit, not global", async () => {
