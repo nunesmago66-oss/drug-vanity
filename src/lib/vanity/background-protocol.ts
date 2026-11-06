@@ -1,6 +1,7 @@
 import { AVAILABILITY_KEYS, storedAvailabilityIsConsistent } from "./availability";
 import { isValidCode, classifyHttpStatus } from "./check-rules";
 import { initialPace, validatePace, type PaceState } from "./pacing";
+import { emptyDiag, validateDiag, type RateLimitDiag } from "./rate-limit-manager";
 import { DEFAULT_SCANNER_CONFIG, type ResultsMap, type ScannerConfig } from "./scanner";
 import { EMPTY_STATS, validateStats, type StatsLog } from "./stats";
 
@@ -22,6 +23,8 @@ export interface BackgroundSnapshot {
   nextAt: number;
   recent: import("./check-rules").CheckResult[];
   error: string | null;
+  /** Shared rate-limit diagnostics (requests, 429s, last limit, recoveries). */
+  diag?: RateLimitDiag;
 }
 export const emptyBackground = (): BackgroundSnapshot => ({
   v: 1,
@@ -40,6 +43,7 @@ export const emptyBackground = (): BackgroundSnapshot => ({
   nextAt: 0,
   recent: [],
   error: null,
+  diag: emptyDiag(0),
 });
 export function validateResults(raw: unknown): ResultsMap {
   if (!raw || typeof raw !== "object" || Array.isArray(raw))
@@ -92,6 +96,7 @@ export function validateBackground(raw: unknown): BackgroundSnapshot {
     meaningResults: validateResults(r.meaningResults),
     pace,
     stats,
+    diag: validateDiag(r.diag),
     codes: [...new Set(r.codes)],
     current: null,
     nextAt: 0,

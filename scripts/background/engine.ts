@@ -7,7 +7,15 @@ import {
   runVerificationQueue,
   type CheckResult,
 } from "../../src/lib/vanity/check-rules";
-import { effectiveInterval, recentLimitCount } from "../../src/lib/vanity/pacing";
+import { effectiveInterval, recentLimitCount, validatePace } from "../../src/lib/vanity/pacing";
+import {
+  emptyDiag,
+  inlineLimitWaitMs,
+  isSuspectedEdgeBlock,
+  noteLimit,
+  noteResponse,
+  validateDiag,
+} from "../../src/lib/vanity/rate-limit-manager";
 import { needsCheck, toCompact } from "../../src/lib/vanity/scanner";
 import { eventFromResult, recordCheck, mergeStats } from "../../src/lib/vanity/stats";
 import {
@@ -24,6 +32,7 @@ export class BackgroundEngine {
   private task: Promise<void> | null = null;
   private starting = false;
   private forceCode: string | null = null;
+  private autoTimer: ReturnType<typeof setTimeout> | null = null;
   constructor(
     private file: string,
     private check = (code: string) => checkInviteFromBrowser({ data: { code } }),
@@ -75,7 +84,9 @@ export class BackgroundEngine {
         results: mergeResults(this.state.results, input.results),
         meaningResults: mergeResults(this.state.meaningResults, input.meaningResults),
         stats: mergeStats(this.state.stats, input.stats),
-        pace: this.state.revision ? this.state.pace : input.pace,
+        // Re-validated so an old slowdown (no 429 in the last 10 min) decays to the normal pace.
+        pace: validatePace(this.state.revision ? this.state.pace : input.pace) ?? input.pace,
+        diag: validateDiag(this.state.diag ?? input.diag ?? emptyDiag(Date.now())),
         cooldownUntil: Math.max(this.state.cooldownUntil, input.cooldownUntil),
         lastCheckAt: Math.max(this.state.lastCheckAt, input.lastCheckAt),
         revision: this.state.revision,
@@ -88,7 +99,22 @@ export class BackgroundEngine {
       this.starting = false;
     }
   }
+  /** After a rate-limit stop the run continues by itself once the wait ends (until the user pauses). */
+  private scheduleAutoResume() {
+    if (this.autoTimer) clearTimeout(this.autoTimer);
+    const wait = Math.max(0, this.state.cooldownUntil - Date.now()) + 250;
+    this.autoTimer = setTimeout(() => {
+      this.autoTimer = null;
+      if (this.task || this.state.status !== "rate_limited") return;
+      this.state.status = "running";
+      this.state.diag = { ...(this.state.diag ?? emptyDiag(Date.now())) };
+      this.state.diag.recoveries++;
+      void this.save().then(() => this.resume());
+    }, wait);
+    this.autoTimer.unref?.();
+  }
   resume() {
+    if (this.state.status === "rate_limited" && !this.task) return this.scheduleAutoResume();
     if (this.task || this.state.status !== "running") return;
     this.stopRequested = false;
     this.task = this.run()
@@ -108,9 +134,25 @@ export class BackgroundEngine {
         this.state.nextAt = 0;
       });
   }
+  /** User pause: also cancels a pending automatic resume. */
   async stop() {
+    this.cancelAutoResume();
+    if (this.state.status === "rate_limited" && !this.task) {
+      this.state.status = "stopped";
+      await this.save();
+    }
     this.stopRequested = true;
     await this.task;
+  }
+  /** Process shutdown: keeps the saved status so a restart resumes where it was. */
+  async shutdown() {
+    this.cancelAutoResume();
+    this.stopRequested = true;
+    await this.task;
+  }
+  private cancelAutoResume() {
+    if (this.autoTimer) clearTimeout(this.autoTimer);
+    this.autoTimer = null;
   }
   async quick(code: string) {
     if (this.task || this.starting) throw new Error("Outra verificação está em execução");
@@ -179,13 +221,21 @@ export class BackgroundEngine {
         await this.save();
         const r = normalizeCheckResult(code, await this.check(code));
         log(r);
+        const diag = noteResponse(this.state.diag ?? emptyDiag(Date.now()), r);
+        this.state.diag = diag;
         // Persist a 429 before anything else; a crash can never erase its wait.
-        if (r.httpStatus === 429 || r.errorKind === "app_block") {
-          this.state.cooldownUntil = Math.max(
-            this.state.cooldownUntil,
-            Date.now() + cooldownForResult(r, recentLimitCount(this.state.pace) + 1) * 1000,
-          );
-          this.state.status = "rate_limited";
+        const suspected = isSuspectedEdgeBlock(r, this.state.pace);
+        if (r.httpStatus === 429 || r.errorKind === "app_block" || suspected) {
+          const inline = suspected ? null : inlineLimitWaitMs(r, 0);
+          const until =
+            Date.now() +
+            (inline ?? cooldownForResult(r, recentLimitCount(this.state.pace) + 1) * 1000);
+          this.state.cooldownUntil = Math.max(this.state.cooldownUntil, until);
+          this.state.diag = noteLimit(diag, r, {
+            inline: inline != null,
+            appUntil: until,
+            origin: suspected ? "suspected_edge" : undefined,
+          });
         } else if (r.errorKind !== "app_throttle") {
           if (r.nextAllowedInSeconds)
             this.state.cooldownUntil = Math.max(
@@ -204,6 +254,9 @@ export class BackgroundEngine {
       onPace: (p) => {
         this.state.pace = p;
       },
+      onLimitWait: () => {
+        if (this.state.diag) this.state.diag.recoveries++;
+      },
     });
     this.state.status =
       outcome.reason === "done"
@@ -216,5 +269,6 @@ export class BackgroundEngine {
     this.state.current = null;
     this.state.nextAt = 0;
     await this.save();
+    if (this.state.status === "rate_limited") this.scheduleAutoResume();
   }
 }
