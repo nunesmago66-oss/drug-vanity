@@ -404,7 +404,8 @@ export function DashboardTab({
                       {rt !== null ? ` · ${ms(rt)}` : ""}
                     </span>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
             {history.length > limit && (

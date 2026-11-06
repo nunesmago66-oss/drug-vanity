@@ -16,7 +16,7 @@ import {
   type CheckResult,
 } from "@/lib/vanity/check-rules";
 import { checkInviteFromBrowser } from "@/lib/vanity/invite-check.browser";
-import { describeResult, toCompact, type ResultsMap } from "@/lib/vanity/scanner";
+import { availabilityOf, describeResult, toCompact, type ResultsMap } from "@/lib/vanity/scanner";
 import { inviteUrl } from "@/lib/vanity/browser";
 import { loadPace, paceAfterLimit, recentLimitCount, savePace } from "@/lib/vanity/pacing";
 
@@ -211,6 +211,7 @@ export function QuickCheck({
               retryAfterSeconds: null,
               reason: "",
               checkedAt: new Date(saved[2] * 1000).toISOString(),
+              availability: availabilityOf(saved),
             })
           }
           className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-dashed bg-background/40 p-3 text-left"
@@ -219,6 +220,7 @@ export function QuickCheck({
           <StatusBadge
             status={saved[0] === "e" ? "exists" : saved[0] === "n" ? "not_found" : "inconclusive"}
           />
+          <span className="text-xs font-medium">{AVAILABILITY_LABEL[availabilityOf(saved)]}</span>
         </button>
       )}
     </section>
