@@ -18,6 +18,7 @@ import {
   type PaceState,
 } from "./pacing";
 import { classifyAvailability, type Availability } from "./availability";
+import { inlineLimitWaitMs, isSuspectedEdgeBlock } from "./rate-limit-manager";
 
 export { DEFAULT_429_WAIT_SECONDS, MAX_SERVER_WAIT_SECONDS };
 
@@ -108,7 +109,12 @@ const ERROR_KINDS: readonly string[] = [
 ];
 
 /** Where a rate-limit stop came from, so a preventive block is never shown as a Discord 429. */
-export type RateLimitSource = "discord" | "cloudflare_edge" | "app_block" | "unknown";
+export type RateLimitSource =
+  | "discord"
+  | "cloudflare_edge"
+  | "app_block"
+  | "unknown"
+  | "suspected_edge";
 
 export function rateLimitSourceOf(
   r: Pick<CheckResult, "httpStatus" | "discordQueried"> & { limitLayer?: LimitLayer | null },
@@ -344,6 +350,8 @@ export interface QueueOptions {
     waitMs: number,
   ) => void;
   onPace?: (pace: PaceState) => void;
+  /** A short Discord 429 being waited out inline; the same code is retried after `waitMs`. */
+  onLimitWait?: (result: CheckResult, waitMs: number, attempt: number) => void;
 }
 
 export interface QueueOutcome {
@@ -397,6 +405,7 @@ export async function runVerificationQueue(opts: QueueOptions): Promise<QueueOut
     const code = codes[i] as string;
     let attempts = 0;
     let throttles = 0;
+    let inlineLimits = 0;
     for (;;) {
       const delay = first
         ? Math.max(0, opts.initialDelayMs ?? 0, extraWaitMs)
@@ -412,8 +421,22 @@ export async function runVerificationQueue(opts: QueueOptions): Promise<QueueOut
 
       if (result.httpStatus === 429 || result.errorKind === "app_block") {
         setPace(paceAfterLimit(pace, limitKindOf(result), now()));
+        // Short per-route Discord limit: wait exactly what Discord asked and retry the same code.
+        const inline = inlineLimitWaitMs(result, inlineLimits);
+        if (inline != null) {
+          inlineLimits++;
+          extraWaitMs = inline;
+          opts.onLimitWait?.(result, inline, inlineLimits);
+          continue;
+        }
         opts.onRateLimit?.(result, i);
         return out("rate_limited", result.retryAfterSeconds, rateLimitSourceOf(result), result);
+      }
+      if (isSuspectedEdgeBlock(result, pace, now())) {
+        // Connection failure right after a 429: retrying would extend a Cloudflare block.
+        setPace(paceAfterLimit(pace, "edge", now()));
+        opts.onRateLimit?.(result, i);
+        return out("rate_limited", null, "suspected_edge", result);
       }
       if (result.errorKind === "app_throttle") {
         // The site's server is spacing requests of all visitors: not a result, try again shortly.
