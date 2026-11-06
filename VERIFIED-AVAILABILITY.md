@@ -116,3 +116,12 @@ O iPhone precisa de HTTPS para instalar o app. Opções:
 2. Toque em **Compartilhar** (quadrado com seta).
 3. Toque em **Adicionar à Tela de Início** → **Adicionar**.
 O DRUG URL abre em tela cheia, com ícone próprio, respeitando notch e barra inferior.
+
+## Limite de taxa (429) — recuperação automática
+
+- Medido na rota real `GET /invites/{code}`: o Discord não envia cabeçalhos X-RateLimit em 200/404; o 429 chega depois de ~20 consultas rápidas ou ~40 a 1 por segundo, com `retry_after` abaixo de 1 s, `global: false`.
+- 429 curto da rota: o app espera o tempo pedido + margem e repete o mesmo código sozinho (até 3 vezes).
+- 429 global, Cloudflare, espera longa ou falha de conexão logo após um 429: a varredura para, salva a espera e recomeça sozinha quando ela termina (a menos que você toque em "Pausar"). Vale também depois de recarregar o site ou reiniciar o segundo plano.
+- Um ritmo lento antigo volta ao normal depois de 10 min sem 429.
+- Scanner → Progresso → "Diagnóstico do limite" mostra conexão, estado, origem, rota, tempo restante, requisições, respostas 429, recuperação e se o bloqueio do Discord ainda está ativo ou se resta só a margem do app.
+- Um bloqueio nunca vira resultado: o código continua pendente.
