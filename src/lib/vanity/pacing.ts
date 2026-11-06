@@ -22,10 +22,10 @@ export type LimitKind = "global" | "route" | "edge" | "app" | "unknown";
 /** How much slower the pacer gets after a 429 of each kind. */
 export const SLOW_DOWN: Record<LimitKind, number> = {
   global: 1.5,
-  route: 2,
+  route: 1.25,
   edge: 3,
   app: 1.25,
-  unknown: 2,
+  unknown: 1.5,
 };
 
 /** 429s inside this window make the next cooldown progressively longer. */
@@ -201,7 +201,16 @@ export function validatePace(raw: unknown, now = Date.now()): PaceState | null {
     typeof r["streak"] === "number" && Number.isFinite(r["streak"]) && r["streak"] >= 0
       ? Math.min(1_000_000, Math.floor(r["streak"]))
       : 0;
-  return { v: 1, intervalMs: clampPace(r["intervalMs"]), streak, limits, note };
+  // No 429 in the last LIMIT_WINDOW_MS: an old slowdown no longer reflects Discord's
+  // current state, so start again from the normal pace instead of staying slow for hours.
+  const interval = clampPace(r["intervalMs"]);
+  return {
+    v: 1,
+    intervalMs: limits.length === 0 ? Math.min(interval, PACE_START_MS) : interval,
+    streak,
+    limits,
+    note,
+  };
 }
 
 export function loadPace(store: Pick<Storage, "getItem"> | null | undefined): PaceState {
