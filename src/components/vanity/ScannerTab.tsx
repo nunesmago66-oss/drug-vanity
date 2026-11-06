@@ -982,7 +982,7 @@ export function ScannerTab({
             </p>
             <p className="text-xs text-muted-foreground">
               O progresso está salvo.{" "}
-              {diag.autoResume === myMode
+              {localBackground || diag.autoResume === myMode
                 ? "A varredura recomeça sozinha quando o prazo terminar."
                 : "Depois do prazo, toque em “Retomar”."}
             </p>
