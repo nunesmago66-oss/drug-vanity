@@ -15,7 +15,20 @@ import {
 } from "./check-rules";
 import { describeError, newRequestId, withTimeout } from "./invite-check.browser";
 
-export const backendUrl = (code: string) => `/api/public/invites/${encodeURIComponent(code)}`;
+export const backendPath = (code: string) => `/api/public/invites/${encodeURIComponent(code)}`;
+
+/**
+ * VITE_INVITE_API_BASE_URL (e.g. https://api.example.com) points the page at
+ * the standalone Node backend (scripts/invite-api) with a dedicated outbound
+ * IP; unset keeps the same-origin route (preview / current publish). Exactly
+ * one backend is used per request — never both.
+ */
+export function apiBase(raw: unknown = import.meta.env["VITE_INVITE_API_BASE_URL"]): string {
+  if (typeof raw !== "string" || !/^https?:\/\/[^\s/]+/i.test(raw.trim())) return "";
+  return raw.trim().replace(/\/+$/, "");
+}
+
+export const backendUrl = (code: string, base: string = apiBase()) => `${base}${backendPath(code)}`;
 
 /** Backend waits up to REQUEST_TIMEOUT_MS for Discord; leave room for the round trip. */
 const BACKEND_TIMEOUT_MS = REQUEST_TIMEOUT_MS + 5000;

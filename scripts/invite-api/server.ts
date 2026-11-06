@@ -35,7 +35,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       .map((s) => s.trim().replace(/\/$/, ""))
       .filter(Boolean),
     trustProxy: env["TRUST_PROXY"] === "1",
-    maxQueue: Math.max(1, Number(env["MAX_QUEUE"] ?? 30) || 30),
+    maxQueue: Math.max(1, Number(env["MAX_QUEUE"] ?? 10) || 10),
     gapMs: Math.max(GLOBAL_MIN_GAP_MS, Number(env["MIN_GAP_MS"] ?? 0) || 0),
   };
 }
