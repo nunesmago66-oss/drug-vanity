@@ -90,7 +90,7 @@ export async function checkInviteViaBackend(
   }
   const r = body as Partial<CheckResult> | null;
   const validReply = res.ok && !!r && typeof r === "object" && r.code === code;
-  if (!validReply && (res.status === 429 || res.status === 503)) {
+  if (!validReply && res.status === 429) {
     // The hosting in front of the site's server limited THIS page (Discord was
     // not asked). Treated as a rate limit so the queue stops and honours the
     // host's Retry-After instead of retrying it as an ordinary failure.
