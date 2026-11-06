@@ -566,10 +566,16 @@ export function ScannerTab({
               autoResume: pauseReasonRef.current === "user" ? null : myMode,
             }));
           setNow(Date.now());
+          // Via the site's server, Discord sees the hosting's shared outbound
+          // address, not the visitor's connection (the PC helper uses its own).
+          const whose =
+            limit?.trace?.layer === "server"
+              ? "do endereço de saída do servidor do site, compartilhado com outros sites da mesma hospedagem"
+              : "da sua conexão";
           const scope = limit?.limitScope
-            ? ` Escopo informado: ${limit.limitScope}${limit.limitScope === "global" ? " (limite global da sua conexão)" : " (limite da rota de convites)"}.`
+            ? ` Escopo informado: ${limit.limitScope}${limit.limitScope === "global" ? ` (limite global ${whose})` : " (limite da rota de convites)"}.`
             : limit?.limitGlobal
-              ? " Limite global da sua conexão."
+              ? ` Limite global ${whose}.`
               : "";
           const origin =
             outcome.rateLimitSource === "discord"
@@ -579,7 +585,7 @@ export function ScannerTab({
                 : outcome.rateLimitSource === "suspected_edge"
                   ? "A conexão com o Discord falhou logo depois de um limite de taxa — provável bloqueio da proteção Cloudflare (o navegador não consegue ler essa resposta). Para não prolongar o bloqueio, o app parou de enviar consultas."
                   : outcome.rateLimitSource === "cloudflare_edge"
-                    ? "A proteção da Cloudflare na frente do Discord bloqueou a consulta (HTTP 429). Esse bloqueio vale para a sua conexão de internet por alguns minutos."
+                    ? `A proteção da Cloudflare na frente do Discord bloqueou a consulta (HTTP 429). Esse bloqueio vale ${limit?.trace?.layer === "server" ? "para o endereço de saída do servidor do site" : "para a sua conexão de internet"} por alguns minutos.`
                     : outcome.rateLimitSource === "app_block"
                       ? "Bloqueio preventivo do app: um limite de taxa do Discord recebido há pouco ainda está ativo, por isso nenhuma consulta foi enviada ao Discord."
                       : "Limite de taxa (HTTP 429) — não foi possível confirmar se veio do Discord ou de um bloqueio preventivo do app.";
