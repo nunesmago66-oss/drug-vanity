@@ -61,7 +61,7 @@ let shuttingDown = false;
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
-  await engine.stop();
+  await engine.shutdown();
   await releaseLock();
   ui.kill();
   server.close(() => process.exit(0));

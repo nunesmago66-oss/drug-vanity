@@ -21,6 +21,13 @@ import { inviteUrl } from "@/lib/vanity/browser";
 import { loadPace, paceAfterLimit, recentLimitCount, savePace } from "@/lib/vanity/pacing";
 
 import { StatusBadge } from "./shared";
+import { acquireScanLock, type ScanLock } from "@/lib/vanity/scan-lock";
+import {
+  inlineLimitWaitMs,
+  noteLimit,
+  noteResponse,
+  updateDiag,
+} from "@/lib/vanity/rate-limit-manager";
 import { backgroundEnabled, backgroundCheck } from "@/lib/vanity/background-browser";
 
 interface Props {
@@ -73,6 +80,19 @@ export function QuickCheck({
       return;
     }
     setError(null);
+    // Same cross-tab lock as the scanner: never a parallel request from another tab.
+    let lock: ScanLock | null = null;
+    if (!backgroundEnabled()) {
+      try {
+        lock = await acquireScanLock();
+      } catch {
+        lock = null;
+      }
+      if (!lock) {
+        setError("Outra aba está verificando agora. Aguarde ou pause a verificação nessa aba.");
+        return;
+      }
+    }
     setChecking(true);
     const startedAt = Date.now();
     // Respect the shared minimum interval between requests.
@@ -87,10 +107,24 @@ export function QuickCheck({
     try {
       lastCheckRef.current = Date.now();
       setLastCheckAt(lastCheckRef.current);
-      const r = normalizeCheckResult(
+      let r = normalizeCheckResult(
         code,
         await checkFn({ data: { code }, signal: controller.signal }),
       );
+      // Short per-route Discord 429: wait what Discord asked and repeat once, like the scanner.
+      const inline = backgroundEnabled() ? null : inlineLimitWaitMs(r, 0);
+      if (inline != null) {
+        if (r.discordQueried !== false) onCheck?.(r, startedAt);
+        updateDiag((d) => ({
+          ...noteLimit(noteResponse(d, r), r, { inline: true, appUntil: Date.now() + inline }),
+          recoveries: d.recoveries + 1,
+        }));
+        await new Promise((res) => setTimeout(res, inline));
+        lastCheckRef.current = Date.now();
+        setLastCheckAt(lastCheckRef.current);
+        r = normalizeCheckResult(code, await checkFn({ data: { code } }));
+      }
+      if (!backgroundEnabled()) updateDiag((d) => noteResponse(d, r));
       setResult(r);
       // A 429 or an app-side block is not a result: keep any previous answer for this code.
       if (errorClassOf(r) !== "rate_limit")
@@ -102,6 +136,7 @@ export function QuickCheck({
         savePace(window.localStorage, pace);
         const secs = cooldownForResult(r, recentLimitCount(pace));
         setCooldownUntil((prev) => Math.max(prev, Date.now() + secs * 1000));
+        updateDiag((d) => noteLimit(d, r, { inline: false, appUntil: Date.now() + secs * 1000 }));
         setNow(Date.now());
       }
     } catch (err) {
@@ -122,6 +157,7 @@ export function QuickCheck({
       if (!backgroundEnabled()) setResults((prev) => ({ ...prev, [r.code]: toCompact(r) }));
     } finally {
       clearTimeout(timer);
+      lock?.release();
       setChecking(false);
     }
   }
